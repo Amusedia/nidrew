@@ -174,9 +174,13 @@ if [ -n "$expected" ] && [ "$current" = "$expected" ]; then
 else
   fail packages "$profile is '${current:-missing}', the lock gives '${expected:-nothing}'; run $apply_hint"
 fi
-for tool in harmonia skopeo; do
+# Harmonia 3 serves the cache with harmonia-cache; its harmonia binary is a
+# Nix-compatible CLI, so report package names rather than --version output.
+for tool in harmonia-cache skopeo; do
   if [ -x "$profile/bin/$tool" ]; then
-    ok packages "$("$profile/bin/$tool" --version 2>&1 | head -n 1)"
+    package=$(readlink -f "$profile/bin/$tool")
+    package=${package#/nix/store/*-}
+    ok packages "$tool from ${package%%/*}"
   else
     fail packages "$profile/bin/$tool is missing"
   fi

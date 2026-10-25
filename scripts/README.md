@@ -124,7 +124,7 @@ Apply manages exactly these files:
 | `/etc/nix/nix.conf` | One added line, `include nidrew.conf`; other content is kept |
 | `/var/lib/nidrew/managed.sha256` | Last-applied checksums of the managed files |
 | `/var/lib/nidrew/previous/` | The previous version of each file apply replaced |
-| `/nix/var/nix/profiles/nidrew-server` | Profile with `bin/harmonia` and `bin/skopeo` |
+| `/nix/var/nix/profiles/nidrew-server` | Profile with `bin/harmonia-cache` (Harmonia) and `bin/skopeo` |
 
 Apply plans every file before changing any. Matching files are left alone and
 unchanged managed files are updated. A managed file edited locally, an
