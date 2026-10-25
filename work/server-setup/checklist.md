@@ -42,7 +42,8 @@ instructions into setup documentation rather than making users read the logs.
 
 - Added `scripts/host/check-prerequisites.ps1` (`-Distribution Debian`,
   `-Source`, `-Revision`): reports Windows, PowerShell, elevation (not
-  required), WSL version, distribution presence and WSL 2, and Task Scheduler
+  required), WSL version (minimum tested 3.0.3; `wslc` needs 2.9 or later),
+  distribution presence and WSL 2, and Task Scheduler
   query access, then runs the Debian check through `wsl.exe --exec`.
 - Added `scripts/server/check-prerequisites.sh` (`--source`, `--revision`):
   reports Debian, WSL kernel, Bash, systemd as PID 1 and system state, Git,
@@ -62,7 +63,7 @@ instructions into setup documentation rather than making users read the logs.
 
 ## Done
 
-8b30ffe
+8b30ffe, 00ef72f
 
 # 2. Provision the operational account and Linux-native checkout
 
