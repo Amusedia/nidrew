@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "mcp__aspire__list_apphosts",
+      "mcp__aspire__select_apphost",
+      "mcp__aspire__list_resources",
+      "mcp__aspire__list_console_logs",
+      "mcp__aspire__list_structured_logs",
+      "mcp__aspire__list_traces",
+      "mcp__aspire__list_trace_structured_logs"
+    ],
+    "ask": [
+      "mcp__aspire__execute_resource_command"
+    ]
+  }
+}
