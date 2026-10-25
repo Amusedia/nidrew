@@ -164,8 +164,10 @@ Installation details and service exposure remain to be settled.
   build sandboxing and signatures, and disable automatic acceptance of
   flake-provided configuration. No additional trusted users are granted.
 - The system `nixpkgs` registry entry matches the committed server lock and is
-  updated with it. Build scripts use explicit locked inputs independently of
-  registry shorthand. Conflicts with existing configuration are reported rather
+  updated with it. `nix-path = nixpkgs=flake:nixpkgs` makes legacy `<nixpkgs>`
+  lookups, such as `nix-shell -p`, resolve through that entry; no channels are
+  added. Build scripts use explicit locked inputs independently of
+  registry shorthand and `<nixpkgs>`. Conflicts with existing configuration are reported rather
   than silently overriding local settings or weakening the required behavior.
 - `nidrew` can inspect and transfer images with Skopeo to an explicitly selected
   test destination without general administrative access.
@@ -308,7 +310,9 @@ configuration remain implementation questions.
   upstream cache trust without adding trusted users. Investigate sandbox
   failures instead of silently disabling sandboxing.
 - Pin the system `nixpkgs` registry entry to the server lock's revision and
-  update them together. Use explicit locked inputs in build scripts. The
+  update them together. Set `nix-path = nixpkgs=flake:nixpkgs` so legacy
+  `<nixpkgs>` follows the same entry instead of a channel; bootstrap adds no
+  channels. Use explicit locked inputs in build scripts. The
   server-wide scope simplifies operation on this dedicated instance; the
   alternative of account-scoped CLI defaults would preserve more independence
   for unrelated users but add configuration contexts to verify.

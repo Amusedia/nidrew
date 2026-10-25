@@ -152,7 +152,8 @@ instructions into setup documentation rather than making users read the logs.
   its `flake.lock`, independent of future agent pins. Build from explicit locked
   inputs and expose a stable package location for service use.
 - Apply server-wide `nix-command` and `flakes`, `sandbox = true`,
-  `require-sigs = true`, and `accept-flake-config = false`. Configure upstream
+  `require-sigs = true`, `accept-flake-config = false`, and
+  `nix-path = nixpkgs=flake:nixpkgs`. Configure upstream
   substitution and its key, with no self-Harmonia endpoint or extra trusted users.
 - Install `/etc/nix/nidrew.conf` with one include in the existing configuration;
   align the system `nixpkgs` registry with the server lock. Track managed paths
@@ -160,7 +161,8 @@ instructions into setup documentation rather than making users read the logs.
   retain previous configuration, and resume verified partial installs.
 - Provide an explicit package/bootstrap update workflow with verification and
   journaled versions. Keep normal setup from silently updating pins.
-- Verify effective settings, registry alignment, a sandboxed build, conflict
+- Verify effective settings, registry alignment, `<nixpkgs>` resolving to the
+  locked revision without channels, a sandboxed build, conflict
   handling and reruns. As `nidrew`, use Skopeo to inspect and transfer a small
   known image to an isolated test destination; do not deploy agent images.
 
