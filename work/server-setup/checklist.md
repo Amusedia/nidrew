@@ -40,7 +40,29 @@ instructions into setup documentation rather than making users read the logs.
 
 ## Summary
 
+- Added `scripts/host/check-prerequisites.ps1` (`-Distribution Debian`,
+  `-Source`, `-Revision`): reports Windows, PowerShell, elevation (not
+  required), WSL version, distribution presence and WSL 2, and Task Scheduler
+  query access, then runs the Debian check through `wsl.exe --exec`.
+- Added `scripts/server/check-prerequisites.sh` (`--source`, `--revision`):
+  reports Debian, WSL kernel, Bash, systemd as PID 1 and system state, Git,
+  curl, sha256sum, tar, xz, sudo access, and the source repository, selected
+  commit, and uncommitted edits that will not reach the server clone. Missing
+  items print exact manual actions; exit 1 on missing requirements.
+- Distinguished session restrictions (no_new_privs, system bus denied) from
+  missing sudo access or a password requirement.
+- Found that Linux Git reports a Windows CRLF checkout as fully modified; the
+  check uses `git diff` with `core.autocrlf=true`. Added `.gitattributes` to
+  keep `*.sh` LF in the Windows checkout. Added `scripts/README.md`.
+- Verification: `scripts/server/tests/check-prerequisites-test.sh` passes 12
+  tests in Debian, including stubbed failure output. The host check passed on
+  this machine and failed usefully for an unknown distribution. Not performed:
+  interactive sudo, a real restricted session, or a Windows user without Task
+  Scheduler access. Details in [journal-2.md](journal-2.md).
+
 ## Done
+
+8b30ffe
 
 # 2. Provision the operational account and Linux-native checkout
 
