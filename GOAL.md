@@ -13,13 +13,16 @@ Reach the first Nidrew milestone: Windows scripts set up Debian services, build 
 - [ ] The base, egress, and one agent image build from Nix.
 - [ ] An agent container deploys through `wslc` with credentials injected from Windows Credential Manager.
 - [ ] Claude Code, Codex, and GitHub Copilot CLI work with subscription credentials.
-- [ ] The Harmonia substituter is usable.
+- [ ] The Harmonia substituter is usable and signed, and consumers reject unsigned paths.
 - [ ] An agent can install Nix packages at runtime as the non-root user, and prebuilt binaries and wheels run through the compatibility layer.
 - [ ] Permitted local ports are reachable; unpermitted local destinations are blocked.
 - [ ] One agent container's permissions do not grant access to another's permitted services.
-- [ ] No Windows folders are mounted by default.
+- [ ] No Windows folders are mounted by default, and the container cannot run Windows executables.
+- [ ] The start script brings up Debian services, egress, and an agent container in order after a host restart.
+- [ ] The user can enter the container, and agent CLI commands run inside it.
 - [ ] Container state survives a container restart and a WSL or host restart.
 - [ ] Work can be pushed from the container to the host git remote.
+- [ ] Teardown refuses to delete a container with uncommitted or unpushed work unless confirmed, and leaves caches, repositories, credentials, and images intact.
 
 ## Constraints
 
@@ -29,6 +32,6 @@ Reach the first Nidrew milestone: Windows scripts set up Debian services, build 
 
 ## Out of Scope
 
-- Nexus CE package caching (v2).
+- README Roadmap items (v2 and later), including Nexus CE, resource limits, and optional mounts.
 - Agent-to-agent messaging and autonomous coordination.
 - Internet domain allowlisting.

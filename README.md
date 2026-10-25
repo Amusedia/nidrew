@@ -8,7 +8,7 @@ The user directs the work and decides when the goal is complete. Agents share a 
 
 This README defines the initial scope and intended architecture. Setup scripts, image definitions, and runtime configuration are not implemented yet.
 
-`wslc` has been verified in a separate environment: it runs Nix-built OCI images, gives each container its own network namespace (separate from the WSL VM), and can restrict an agent container's network to the egress container. Re-verify these on the target machine during prerequisite checks.
+`wslc` has been verified in a separate environment: it runs Nix-built OCI images, gives each container its own network namespace (separate from the WSL VM), and can restrict an agent container's network to the egress container. Re-verify these on the target machine during prerequisite checks. Record the experiment's versions, commands, networking configuration, results, and limits in the repository when available so it can be reproduced.
 
 ## Concepts
 
@@ -39,6 +39,11 @@ Not protected in the initial version:
 * Data exfiltration over the open internet.
 * Credentials shared among agents in the same container; any agent or process there can read them.
 * Work in a container that is deleted before it is pushed.
+* Kernel exploits. Containers share the WSL kernel; this is not strong multi-tenant isolation.
+* A malicious or prompt-injected agent acting within its granted access.
+* Competition for host CPU, memory, and disk; resource limits are v2 scope.
+
+Agent containers must not run Windows executables or reach Windows interop. Verify this for the chosen runtime rather than assuming it.
 
 ## Architecture
 
@@ -56,7 +61,7 @@ Keep persistent build and cache services on Debian, outside disposable agent con
 ### Build and cache services
 
 * Nix declares environments and builds images.
-* Harmonia serves the Debian Nix store as a binary cache for image builds and for runtime installs inside agent containers.
+* Harmonia serves the Debian Nix store as a binary cache for image builds and for runtime installs inside agent containers. Sign it with a dedicated key; consumers trust only its public key and cache.nixos.org's.
 * Skopeo inspects and transfers container images where the build and deployment workflow requires it.
 
 ## Agent Templates
@@ -119,7 +124,9 @@ Intended environment variables:
 | Codex | `CODEX_ACCESS_TOKEN` | Subscription access token |
 | GitHub Copilot CLI | `GH_TOKEN` | Fine-grained token with Copilot access |
 
-Before implementing injection, verify each variable name, the token lifetime and refresh behavior, and that each CLI accepts it for subscription access. Scope `GH_TOKEN` to the minimum permissions, since `gh` and git also use it. Do not substitute an API key when subscription sign-in requires a different flow. Document any required manual browser sign-in or credential preparation.
+Before implementing injection, verify each variable name, the token lifetime and refresh behavior, and that each CLI accepts it for subscription access. Scope `GH_TOKEN` to the minimum permissions, since `gh` and git also use it. Do not substitute an API key when subscription sign-in requires a different flow. Use only documented provider interfaces. If a CLI has no supported variable for subscription access, sign in once inside the container; its credential directory persists with container state. Document any required manual browser sign-in or credential preparation.
+
+To rotate an injected credential, update Credential Manager, push outstanding work, and recreate the container. Revoke a compromised token at its provider.
 
 ## Networking and Isolation
 
@@ -138,6 +145,13 @@ PowerShell discovers the relevant Windows and Debian addresses rather than hardc
 
 Agent containers have no Windows folder mounts by default. Agents in the same container share its filesystem.
 
+## Lifecycle and Operations
+
+* Start order: Debian services, then the egress container, then agent containers. The start script checks each is ready before starting the next and is safe to rerun after a host restart.
+* Entry: a script opens a shell in a selected agent container. Verify that the agent CLIs' commands and file edits run inside the container, not on the host.
+* Output: only work pushed to the host git remote is retained. Uncommitted, untracked, and ignored files, build artifacts, and logs are lost when the container is deleted.
+* Teardown: the delete script lists uncommitted changes and unpushed commits and refuses to delete while they exist unless the user confirms. A failed push leaves the container in place. Teardown removes only the container; it never removes Debian caches, host git repositories, Credential Manager entries, or images without a separate, confirmed request.
+
 ## Initial Workflow
 
 Every step is started by scripts invoked from the Windows host. Keep PowerShell thin: prerequisite checks, credential retrieval, and invoking scripts in Debian. Keep build and deployment logic in Debian scripts.
@@ -149,8 +163,8 @@ Every step is started by scripts invoked from the Windows host. Keep PowerShell 
 5. Build an agent image from the selected `.nix` file.
 6. Read its matching YAML, resolve credential references, and configure runtime access.
 7. Deploy through `wslc` and verify the agent CLIs and network boundaries.
-8. Work toward the goal in `GOAL.md`, retaining container state across interruptions.
-9. Push completed work to the host git remote, then delete the container.
+8. Enter the container and work toward the goal in `GOAL.md`, retaining container state across interruptions.
+9. Push completed work to the host git remote, then delete the container through the teardown script.
 
 Scripts should be safe to rerun and explain any required manual actions. When Codex or Claude Code cannot perform a step, guide the user through it and verify the resulting state before continuing.
 
@@ -161,17 +175,39 @@ The first milestone is complete when Windows scripts can set up Debian services,
 Verify that:
 
 * All three CLIs work with the intended subscription credentials.
-* The Harmonia substituter is usable.
+* The Harmonia substituter is usable and signed, and consumers reject unsigned paths.
 * An agent can install a Nix package at runtime as the non-root user, using Harmonia first and cache.nixos.org second.
 * A prebuilt binary or Python wheel installed at runtime runs through the compatibility layer.
 * Permitted local ports are reachable and unpermitted local destinations are blocked.
 * One agent container's permissions do not grant access to another's permitted services.
-* No Windows folders are mounted by default.
+* No Windows folders are mounted by default, and the container cannot run Windows executables.
+* The start script brings up Debian services, egress, and an agent container in order after a host restart.
+* The user can enter the container, and agent CLI commands run inside it.
 * Container state survives a container restart and a WSL or host restart.
 * Work can be pushed from the container to the host git remote.
+* Teardown refuses to delete a container with uncommitted or unpushed work unless confirmed, and leaves caches, repositories, credentials, and images intact.
 
 Report any manual steps and unresolved limitations.
 
-## Deferred to v2
+## Roadmap
 
-* Nexus CE package caching for npm, PyPI, and NuGet, with optional Docker registry caching.
+### v2: Operations and caching
+
+* Nexus CE package caching for npm, PyPI, and NuGet, possibly Maven and Cargo, with optional Docker registry caching. Verify support in the deployed Nexus CE version and edition.
+* Per-container CPU, memory, disk, and concurrency limits declared in YAML.
+* Cache maintenance: storage limits, retention, garbage collection, and health checks.
+* Automatic startup of Debian services and egress at Windows sign-in, such as a current-user Scheduled Task. Validate the mechanism before adopting it.
+* Optional read-only or writable project and artifact mounts declared in YAML.
+* Collection of non-git outputs such as build artifacts, test reports, and logs.
+
+### Later: candidates to validate
+
+Adopt these only when an actual workflow or measurement shows the need.
+
+* Source-code research service: upstream git mirrors, revision metadata, indexes, language servers, mapping installed Nix packages to source revisions, and answers citing repository, revision, file, and line. Possibly exposed through MCP or a headless research agent. Running Copilot CLI is not equivalent.
+* Editor integration: a VS Code attach workflow, MCP configuration, and a skills and hooks bundle.
+* Host capabilities: GPU and local inference access, and host applications such as Godot.
+* Warm container pool and a persistent supervisor, only if measured startup time justifies them.
+* Agent coordination: messaging and handoffs between agents.
+* Provenance and observability: audit trails and startup, cache, and resource metrics.
+* Portability to other hosts, runtime backends, and remote nodes.
