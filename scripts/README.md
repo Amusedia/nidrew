@@ -11,6 +11,9 @@ directly on Linux without PowerShell.
 | [server/provision-account.sh](server/provision-account.sh) | Debian, root through sudo | Create `nidrew`, `/home/nidrew/artifacts`, and the server checkout |
 | [server/sync-checkout.sh](server/sync-checkout.sh) | Debian, `nidrew` | Clone or fetch the source and select a committed revision |
 | [server/check-account.sh](server/check-account.sh) | Debian, root through sudo | Check the account, storage, checkout, and fetch access |
+| [server/bootstrap-nix.sh](server/bootstrap-nix.sh) | Debian, root through sudo | Install the pinned multi-user Nix after verifying the installer |
+| [server/fetch-nix-installer.sh](server/fetch-nix-installer.sh) | Debian, any user | Download the pinned Nix installer and verify its checksum |
+| [server/check-nix.sh](server/check-nix.sh) | Debian, root through sudo | Check the Nix version, daemon, build users, trust, and a build as `nidrew` |
 
 WSL containers (`wslc`) require WSL 2.9 or later. The host check requires the
 tested WSL 3.0.3 or later; update with `wsl.exe --update`.
@@ -56,3 +59,35 @@ a commit that is not on any branch or tag. Source access is read through Git
 only: the clone's `remote.origin.uploadpack` trusts the source's `.git`
 directory, and no global Git configuration is changed. Run tests for Debian scripts with
 `scripts/server/tests/*-test.sh`.
+
+## Multi-user Nix
+
+[server/nix-release.conf](server/nix-release.conf) pins the upstream Nix
+release and the SHA-256 of its shell installer. An administrator installs it:
+
+```sh
+sudo bash /mnt/c/projects/nidrew/scripts/server/bootstrap-nix.sh
+```
+
+The script downloads the installer, refuses it unless the checksum matches,
+and runs it as `install --daemon --yes --no-channel-add`; the installer checks
+the binary tarball against the hash it embeds. No channel is added. The
+installer creates `/nix`, `/etc/nix/nix.conf`, group `nixbld` with 32 build
+users, and the `nix-daemon` systemd units, and loads Nix in shells through
+`/etc/profile.d/nix.sh` and `/etc/bash.bashrc` (backed up as
+`/etc/bash.bashrc.backup-before-nix`). Open a new shell afterwards.
+
+Rerunning with the pinned version installed changes nothing and runs the
+checks. Another installed version, a single-user installation, or leftovers
+from an interrupted installation stop the script without changes and name the
+paths to inspect; the upstream installer cannot resume, so remove them
+following the [uninstall guide](https://nix.dev/manual/nix/stable/installation/uninstall.html)
+and rerun. Verify at any time with:
+
+```sh
+sudo bash /mnt/c/projects/nidrew/scripts/server/check-nix.sh
+```
+
+`nidrew` builds through the daemon without sudo and is not a trusted user.
+Change the pin only deliberately, then rerun the checks and record the result
+in the work journal.

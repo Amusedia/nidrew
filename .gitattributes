@@ -1,2 +1,4 @@
 # Debian runs scripts directly from the Windows checkout; keep LF endings.
 *.sh text eol=lf
+# Debian reads the release pin from the Windows checkout; keep LF endings.
+scripts/server/*.conf text eol=lf

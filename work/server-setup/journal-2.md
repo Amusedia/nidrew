@@ -30,6 +30,46 @@ records implementation lessons from the [checklist](checklist.md).
 - `wsl.exe` writes its own messages as UTF-16 unless `WSL_UTF8=1` is set.
   Windows PowerShell 5.1 also mangles inline `bash -c` scripts containing
   double quotes; run script files with `--exec bash <path> <args>` instead.
+- Pin Nix by the installer script's SHA-256: the upstream `install` script
+  embeds and checks the binary tarball hash, so one verified file pins both.
+  Release `install.sha256` files exist beside each installer.
+- The upstream multi-user installer runs correctly as root (no sudo inside)
+  and accepts `--daemon --yes --no-channel-add` for unattended installation.
+  It cannot resume a partial installation, so bootstrap stops on leftovers.
+
+## 2026-10-25: Pinned multi-user Nix (checklist item 3)
+
+Environment: as for item 1. Selected Nix 2.35.4, the newest release listed at
+`https://nix-releases.s3.amazonaws.com/?prefix=nix/` on this date. Installer
+SHA-256 `118c3dfa...1ee1` matched the published `install.sha256`; the embedded
+x86_64-linux tarball hash `ff66236d...18c3` matched the downloaded tarball.
+
+Checks performed:
+
+```sh
+scripts/server/tests/fetch-nix-installer-test.sh   # 7 passed
+scripts/server/tests/bootstrap-nix-test.sh         # 6 passed before install
+sudo bash scripts/server/bootstrap-nix.sh --release-file /tmp/nidrew-bad-release.conf
+sudo bash scripts/server/bootstrap-nix.sh
+bash scripts/server/bootstrap-nix.sh               # rerun as peijen
+```
+
+Observed: with an all-zero pinned checksum, bootstrap as root refused with
+"checksum mismatch" before running anything and no `/nix` was created. The
+real run installed Nix 2.35.4; `check-nix.sh` passed: socket enabled and
+active, service linked and active, `nixbld` gid 30000 with 32 members,
+`trusted-users = root`, `sandbox = true`, `nidrew` on `Store URL: daemon` with
+`Trusted: 0`, and a sandboxed `/bin/sh` derivation built as `nidrew` without
+sudo. `nix` is on `nidrew`'s login PATH. The installer wrote only
+`build-users-group = nixbld` to `/etc/nix/nix.conf` and backed up
+`/etc/bash.bashrc`. The rerun reported "nothing to install". After
+installation the non-root bootstrap tests skip because `/nix` exists.
+
+Not performed: the leftover, other-version, and single-user refusals were
+reviewed in code only; no partial installation was created on the host.
+
+What can be skipped: readers do not need to verify the tarball separately or
+add channels; item 4 applies the Nix settings and the pinned registry.
 
 ## 2026-10-25: Prerequisite checks (checklist item 1)
 
