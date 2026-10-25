@@ -111,6 +111,21 @@ t_detached_source_commit() {
 }
 check "commit only reachable from a detached source HEAD is fetched" t_detached_source_commit
 
+t_source_other_owner() {
+  # Git treats every repository as owned by another user, as with /mnt/c.
+  # The checkout's owner runs the script, so trust it separately here.
+  export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=safe.directory GIT_CONFIG_VALUE_0="$checkout"
+  GIT_TEST_ASSUME_DIFFERENT_OWNER=1 run_sync
+  expect_status 0 && expect_equal "$(checkout_head)" "$first" "checkout HEAD" &&
+    second=$(commit_source two) &&
+    GIT_TEST_ASSUME_DIFFERENT_OWNER=1 run_sync &&
+    expect_status 0 && expect_equal "$(checkout_head)" "$second" "checkout HEAD after fetch"
+  local result=$?
+  unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
+  return $result
+}
+check "source owned by another user is cloned and fetched" t_source_other_owner
+
 t_unknown_revision() {
   run_sync --revision no-such-ref
   expect_status 1 && expect_output "no-such-ref does not name a commit"

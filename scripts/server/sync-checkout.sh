@@ -62,9 +62,13 @@ refuse() {
 }
 
 # The source is usually owned by another user on /mnt/c. Trust exactly that
-# path for these commands instead of changing global Git configuration.
+# repository for these commands instead of changing global Git configuration.
+# Local commands check the worktree path. Fetches run upload-pack in the .git
+# directory, and Git drops -c settings for it, so the clone's remote config
+# names an upload-pack command that trusts the source.
 src_git() { git -c "safe.directory=$source_path" -C "$source_path" "$@"; }
-co_git() { git -c "safe.directory=$source_path" -C "$checkout" "$@"; }
+co_git() { git -C "$checkout" "$@"; }
+upload_pack="git -c safe.directory=$(printf %q "$source_path/.git") upload-pack"
 
 commit=$(src_git rev-parse --verify --quiet "$revision^{commit}") ||
   refuse "$revision does not name a commit in $source_path" \
@@ -101,11 +105,13 @@ if [ -e "$checkout" ] && ! { [ -d "$checkout" ] && [ -z "$(ls -A "$checkout")" ]
     refuse "$checkout has uncommitted changes:
 $changes" "commit, stash, or remove them in $checkout, then rerun"
 
+  [ "$(co_git config --get remote.origin.uploadpack)" = "$upload_pack" ] ||
+    co_git config remote.origin.uploadpack "$upload_pack"
   co_git fetch --quiet --prune --tags origin ||
     refuse "fetching from $source_path failed" "check that this account can read $source_path"
 else
-  git -c "safe.directory=$source_path" clone --quiet --no-local --no-checkout \
-    "$source_path" "$checkout" ||
+  git clone --quiet --no-local --no-checkout --upload-pack "$upload_pack" \
+    --config "remote.origin.uploadpack=$upload_pack" "$source_path" "$checkout" ||
     refuse "cloning $source_path into $checkout failed" \
       "check that this account can read $source_path and write $(dirname "$checkout")"
 fi
