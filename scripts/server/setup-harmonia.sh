@@ -225,8 +225,12 @@ printf 'Public key: %s\n' "$(cat "$public")"
 [ $units_changed -eq 0 ] || systemctl daemon-reload || refuse "systemctl daemon-reload failed"
 systemctl enable harmonia.socket harmonia.service >/dev/null 2>&1 ||
   refuse "cannot enable harmonia.socket and harmonia.service"
-if [ $units_changed -eq 1 ]; then
+# A failed service or socket, for example after the key was missing, keeps
+# refusing starts until its failed state is cleared.
+systemctl reset-failed harmonia.service harmonia.socket 2>/dev/null
+if [ $units_changed -eq 1 ] || [ "$(systemctl is-active harmonia.socket)" != active ]; then
   systemctl restart harmonia.socket || refuse "cannot start harmonia.socket; see: systemctl status harmonia.socket"
+  printf 'started harmonia.socket\n'
 fi
 if [ $units_changed -eq 1 ] || [ $config_changed -eq 1 ] || [ "$key_action" = generated ] ||
   [ "$(systemctl is-active harmonia.service)" != active ]; then

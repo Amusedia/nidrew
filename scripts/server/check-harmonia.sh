@@ -177,6 +177,8 @@ if [ $restart -eq 1 ]; then
     fail service "harmonia.service did not restart; see: journalctl -u harmonia.service"
   fi
 fi
+[ "$(systemctl is-active harmonia.socket)" = active ] && ok service "harmonia.socket is active" ||
+  fail service "harmonia.socket is $(systemctl is-active harmonia.socket); after fixing the cause, run $setup_hint"
 listeners=$(ss -Hltn | awk '$4 ~ /:5000$/ { print $4 }' | sort -u | paste -sd' ')
 [ "$listeners" = "$listen" ] && ok service "only $listen listens on port 5000" ||
   fail service "port 5000 listeners are '${listeners:-none}', expected only $listen"
@@ -186,7 +188,7 @@ if [ "$(systemctl is-active harmonia.service)" = active ]; then
   [ "$user" = "$account" ] && ok service "harmonia.service is active as $user (pid $pid)" ||
     fail service "harmonia.service runs as '${user:-unknown}', expected $account"
 else
-  fail service "harmonia.service is $(systemctl is-active harmonia.service); see: journalctl -u harmonia.service"
+  fail service "harmonia.service is $(systemctl is-active harmonia.service); see: journalctl -u harmonia.service; after fixing the cause, run $setup_hint"
 fi
 
 # Serving: a locally built path, so only Harmonia's signature can vouch for it.

@@ -17,6 +17,9 @@ User=harmonia
 Group=harmonia
 WatchdogSec=15
 Restart=on-failure
+# Slow retries stay under the start limit, which would also fail the socket,
+# so the service recovers by itself once a missing key is restored.
+RestartSec=5
 RuntimeDirectory=harmonia
 UMask=0066
 LimitNOFILE=65536

@@ -17,6 +17,9 @@ directly on Linux without PowerShell.
 | [server/apply-nix-config.sh](server/apply-nix-config.sh) | Debian, root through sudo | Apply the server Nix settings and registry, and build the locked server packages |
 | [server/check-nix-config.sh](server/check-nix-config.sh) | Debian, root through sudo | Check settings, registry, `<nixpkgs>`, packages, and Skopeo as `nidrew` |
 | [server/update-server-lock.sh](server/update-server-lock.sh) | Debian, ordinary user in the source checkout | Deliberately update the server nixpkgs pin |
+| [server/setup-harmonia.sh](server/setup-harmonia.sh) | Debian, root through sudo | Create the `harmonia` account and signing key, and run the local Harmonia service |
+| [server/check-harmonia.sh](server/check-harmonia.sh) | Debian, root through sudo | Check the key protection, service, and a signed path served to `nidrew` |
+| [host/harmonia-key-recovery.ps1](host/harmonia-key-recovery.ps1) | Windows PowerShell, invoking user | Optionally save or restore the signing key in Windows Credential Manager |
 
 WSL containers (`wslc`) require WSL 2.9 or later. The host check requires the
 tested WSL 3.0.3 or later; update with `wsl.exe --update`.
@@ -152,3 +155,91 @@ scripts/server/update-server-lock.sh
 It prints the old and new nixpkgs revision and tool versions and the steps to
 commit, sync, apply, check, and record the result in the work journal. To
 update Nix itself, change `server/nix-release.conf` the same way.
+
+## Harmonia cache
+
+Harmonia serves the Debian Nix store as a signed binary cache. Apply the
+server Nix configuration first; it installs `harmonia-cache` in the
+`nidrew-server` profile. Then, as an administrator:
+
+```sh
+sudo bash /home/nidrew/nidrew/scripts/server/setup-harmonia.sh
+sudo bash /home/nidrew/nidrew/scripts/server/check-harmonia.sh --restart
+```
+
+Setup creates the system account `harmonia` (no login shell, no sudo, only
+its own group, not a Nix trusted user), generates the signing key once, and
+installs and starts the service. Its output ends with the public key, which
+consumers add to `trusted-public-keys`. `--key-name NAME` names a newly
+generated key; the default is `nidrew-<hostname>-1`.
+
+| Path | Content |
+| --- | --- |
+| `/etc/harmonia/secret-key` | Signing key, root:root mode 0600; created once, never replaced |
+| `/etc/harmonia/public-key` | Public key derived from it, mode 0644 |
+| `/etc/harmonia/harmonia.toml` | Copy of [server/harmonia/harmonia.toml](server/harmonia/harmonia.toml) |
+| `/etc/systemd/system/harmonia.socket` | Copy of [server/harmonia/harmonia.socket](server/harmonia/harmonia.socket): listens on `127.0.0.1:5000` only |
+| `/etc/systemd/system/harmonia.service` | Copy of [server/harmonia/harmonia.service](server/harmonia/harmonia.service) |
+
+The configuration and units are managed files with checksums in
+`/var/lib/nidrew/managed.sha256`, handled like the Nix configuration above.
+systemd passes the key to the service with `LoadCredential=`, so the unit
+holds only the path and Harmonia restarts from the Debian copy without any
+other input. The service runs as `harmonia` from the inherited socket with no
+network access of its own and a read-only system; it reads the Nix database
+directly and cannot write the store. Neither `nidrew` nor `harmonia` can read
+the key file. Without a readable key the service fails at its credentials
+step and retries every 5 seconds, so it recovers by itself once the key is
+back; rerunning setup also clears a failed state.
+
+The check verifies the account, the key's protection and that its value is
+absent from the units, configuration, and journal, the managed files, the
+listener, and that `nidrew` can verify a locally built store path from the
+cache with the public key and that it is rejected without it. `--restart`
+restarts the service first. Network exposure beyond `127.0.0.1` is
+configured separately.
+
+### Signing key backup, recovery, and rotation
+
+Back up the key once after setup and keep the copy outside this instance, for
+example in a password manager. Reading it shows the secret on your terminal:
+
+```sh
+sudo cat /etc/harmonia/secret-key
+```
+
+Optionally, keep a recovery copy in Windows Credential Manager for the
+invoking Windows user on this computer. The key passes through `wsl.exe` as
+root and is never printed:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\host\harmonia-key-recovery.ps1 -Action Save
+```
+
+To recover a lost key, restore it as `/etc/harmonia/secret-key` with mode
+0600, owned by root, then rerun setup, which checks it against
+`/etc/harmonia/public-key` and restarts the service. From Credential Manager,
+which refuses to replace an existing file:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\host\harmonia-key-recovery.ps1 -Action Restore
+```
+
+From another backup, in Debian (paste the key, then press Ctrl-D):
+
+```sh
+sudo sh -c 'umask 077; cat > /etc/harmonia/secret-key'
+sudo bash /home/nidrew/nidrew/scripts/server/setup-harmonia.sh
+```
+
+Setup refuses a public key without a secret key, so a lost key is never
+replaced silently. If no backup exists, or the key may have been exposed,
+rotate it deliberately: move both files aside, generate a key with the next
+name, update every consumer's `trusted-public-keys`, then remove the old
+files and any old Credential Manager copy.
+
+```sh
+sudo mv /etc/harmonia/secret-key /etc/harmonia/secret-key.retired
+sudo mv /etc/harmonia/public-key /etc/harmonia/public-key.retired
+sudo bash /home/nidrew/nidrew/scripts/server/setup-harmonia.sh --key-name nidrew-<hostname>-2
+```
