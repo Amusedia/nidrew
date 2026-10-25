@@ -36,6 +36,56 @@ records implementation lessons from the [checklist](checklist.md).
 - The upstream multi-user installer runs correctly as root (no sudo inside)
   and accepts `--daemon --yes --no-channel-add` for unattended installation.
   It cannot resume a partial installation, so bootstrap stops on leftovers.
+- Harmonia 3.x ships `harmonia-cache` (the HTTP cache), `harmonia-daemon`,
+  and `harmonia`, a Nix-compatible CLI; `harmonia --version` prints a Nix
+  version. Services use `harmonia-cache`.
+- Nix resolves a relative `include` against the including file's directory,
+  so `include nidrew.conf` works in `/etc/nix` and in a temporary copy used for
+  validation with `NIX_CONF_DIR`. `nix config show` reports unknown settings
+  as `warning:` lines with exit status 0; validation must check stderr.
+- `nix config show experimental-features` lists implied features such as
+  `fetch-tree`; compare features as a set.
+- From Git Bash, pass `MSYS_NO_PATHCONV=1` to `wsl.exe` so Linux paths such as
+  `/tmp/...` are not rewritten into Windows paths.
+
+## 2026-10-25: Server Nix configuration and packages (checklist item 4)
+
+Environment: as for item 3. Locked `nix/server/flake.nix` to the newest
+`nixos-26.05` commit, `1f607aa79b6356ed45d3cd3c8079c196e79efa2c`
+(narHash `sha256-Mg3rRjsb...P9eg=`, lib.version 26.05pre-git): Harmonia 3.1.0
+and Skopeo 1.22.2, both substituted from `cache.nixos.org`. Test image:
+busybox 1.37.0 index `sha256:bdf57e52...f82e` (amd64 manifest
+`sha256:66a6306d...86e4`).
+
+Checks performed:
+
+```sh
+scripts/server/tests/apply-nix-config-test.sh    # 23 passed
+sudo -u nidrew -i bash /home/nidrew/nidrew/scripts/server/sync-checkout.sh --revision 72b52ea
+sudo bash /home/nidrew/nidrew/scripts/server/apply-nix-config.sh   # twice
+# append '# local edit' to /etc/nix/nidrew.conf, apply again, restore with cp -p
+sudo bash /home/nidrew/nidrew/scripts/server/check-nix-config.sh
+```
+
+Observed: the first apply installed `nidrew.conf` and `registry.json`, added
+the include to `nix.conf` (previous copy retained), restarted the daemon, and
+built the `nidrew-server` profile; all checks passed. Effective settings for
+`nidrew` matched the template; `flake:nixpkgs` and `<nixpkgs>` resolved to the
+locked revision with no channels; a sandboxed build as `nidrew` succeeded; as
+`nidrew`, Skopeo inspected the digest-pinned image and copied it to an `oci:`
+layout in a temporary directory. The rerun reported every step unchanged. The
+local edit was refused with nothing changed; after restoring the file the
+check passed again. The file tests cover template updates, unexpected files,
+`nix.conf` conflicts, resumption, and invalid settings.
+
+Not performed: `update-server-lock.sh` was not run against a newer revision;
+template updates, unexpected files, and `nix.conf` conflicts were exercised
+only by the file tests, not on `/etc/nix`. The daemon check compares its start
+time with configuration file times, so touching a file without changing it
+requires a daemon restart.
+
+What can be skipped: readers do not need channels, `NIX_PATH`, or a separate
+registry pin; `apply-nix-config.sh` derives the registry from the lock.
 
 ## 2026-10-25: Pinned multi-user Nix (checklist item 3)
 

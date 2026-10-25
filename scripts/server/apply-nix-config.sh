@@ -238,7 +238,8 @@ if [ "$(systemctl is-active nix-daemon.service)" = active ]; then
   fi
 fi
 
-previous=$(readlink -f "$profile" 2>/dev/null)
+previous=
+[ ! -e "$profile" ] || previous=$(readlink -f "$profile")
 out=$(nix_cmd build --no-update-lock-file --no-write-lock-file --print-out-paths \
   --profile "$profile" "path:$flake_dir#default") ||
   refuse "building the server packages from $lock failed; see the output above" \
