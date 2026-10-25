@@ -192,24 +192,28 @@ else
 fi
 
 # Serving: a locally built path, so only Harmonia's signature can vouch for it.
-if info=$(curl -fsS "$cache_url/nix-cache-info" 2>"$work/curl.err"); then
-  ok cache "$cache_url/nix-cache-info: $(printf '%s' "$info" | tr '\n' ' ')"
-else
-  fail cache "$cache_url/nix-cache-info failed: $(cat "$work/curl.err")"
-fi
+# The socket accepts connections while the service waits to restart, so every
+# request has a time limit.
 path=$(readlink -f "$profile")
 key=$(cat "$public" 2>/dev/null)
-if [ -n "$key" ] && as_reader "$profile_bin/nix" --extra-experimental-features nix-command store verify \
-  --store "$cache_url" --trusted-public-keys "$key" "$path" >"$work/verify.out" 2>&1; then
-  ok cache "$reader verified $path from $cache_url with ${key%%:*}"
+if info=$(curl -fsS --max-time 10 "$cache_url/nix-cache-info" 2>"$work/curl.err"); then
+  ok cache "$cache_url/nix-cache-info: $(printf '%s' "$info" | tr '\n' ' ')"
+  if [ -n "$key" ] && as_reader timeout 120 "$profile_bin/nix" --extra-experimental-features nix-command \
+    store verify --store "$cache_url" --trusted-public-keys "$key" "$path" >"$work/verify.out" 2>&1; then
+    ok cache "$reader verified $path from $cache_url with ${key%%:*}"
+  else
+    fail cache "$reader cannot verify $path from $cache_url with the public key: $(tr '\n' ' ' <"$work/verify.out")"
+  fi
+  as_reader timeout 120 "$profile_bin/nix" --extra-experimental-features nix-command store verify --no-contents \
+    --store "$cache_url" --trusted-public-keys "$upstream_key" "$path" >"$work/verify.out" 2>&1
+  if grep -q 'is untrusted' "$work/verify.out"; then
+    ok cache "$path is rejected as untrusted without the Harmonia key"
+  else
+    fail cache "$path from $cache_url was not rejected as untrusted without the Harmonia key: $(tr '\n' ' ' <"$work/verify.out")"
+  fi
 else
-  fail cache "$reader cannot verify $path from $cache_url with the public key: $(tr '\n' ' ' <"$work/verify.out")"
-fi
-if as_reader "$profile_bin/nix" --extra-experimental-features nix-command store verify --no-contents \
-  --store "$cache_url" --trusted-public-keys "$upstream_key" "$path" >/dev/null 2>&1; then
-  fail cache "$path from $cache_url verified without the Harmonia key; it is not a locally built test path"
-else
-  ok cache "$path is rejected as untrusted without the Harmonia key"
+  fail cache "$cache_url/nix-cache-info failed: $(cat "$work/curl.err")"
+  report skip cache "signature checks need a responding cache"
 fi
 
 printf '\n'
