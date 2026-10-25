@@ -1,0 +1,7 @@
+# Harmonia cache settings, installed as /etc/harmonia/harmonia.toml by
+# scripts/server/setup-harmonia.sh. The listener comes from harmonia.socket;
+# bind applies only when harmonia-cache runs without socket activation.
+bind = "127.0.0.1:5000"
+workers = 4
+max_connection_rate = 256
+priority = 50

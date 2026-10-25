@@ -1,0 +1,55 @@
+# Installed as /etc/systemd/system/harmonia.service by
+# scripts/server/setup-harmonia.sh. Serves the Debian Nix store read-only as
+# the harmonia account; the signing key arrives as a systemd credential.
+[Unit]
+Description=Harmonia binary cache (Nidrew)
+Requires=harmonia.socket
+After=harmonia.socket
+
+[Service]
+Type=notify
+ExecStart=/nix/var/nix/profiles/nidrew-server/bin/harmonia-cache
+Environment=CONFIG_FILE=/etc/harmonia/harmonia.toml
+Environment=SIGN_KEY_PATHS=%d/signing-key
+Environment=HOME=/run/harmonia
+LoadCredential=signing-key:/etc/harmonia/secret-key
+User=harmonia
+Group=harmonia
+WatchdogSec=15
+Restart=on-failure
+RuntimeDirectory=harmonia
+UMask=0066
+LimitNOFILE=65536
+
+# The inherited socket keeps working without network access of its own.
+PrivateNetwork=true
+RestrictAddressFamilies=AF_UNIX
+IPAddressDeny=any
+
+NoNewPrivileges=true
+CapabilityBoundingSet=
+PrivateUsers=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+DeviceAllow=
+PrivateMounts=true
+ProtectKernelModules=true
+ProtectKernelTunables=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectHostname=true
+ProtectClock=true
+ProtectProc=invisible
+ProcSubset=pid
+RestrictNamespaces=true
+RestrictRealtime=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @resources
+
+[Install]
+WantedBy=multi-user.target

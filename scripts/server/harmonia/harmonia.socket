@@ -1,0 +1,11 @@
+# Installed as /etc/systemd/system/harmonia.socket by
+# scripts/server/setup-harmonia.sh. Local access only until the cache endpoint
+# and its network restrictions are configured.
+[Unit]
+Description=Harmonia binary cache socket (Nidrew)
+
+[Socket]
+ListenStream=127.0.0.1:5000
+
+[Install]
+WantedBy=sockets.target

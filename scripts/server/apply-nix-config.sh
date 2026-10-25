@@ -97,6 +97,9 @@ nix_conf=$conf_dir/nix.conf
 [ -f "$nix_conf" ] && [ ! -L "$nix_conf" ] ||
   refuse "$nix_conf is missing or not a regular file" "install Nix with bootstrap-nix.sh first"
 
+# shellcheck source=managed-files.sh
+. "$script_dir/managed-files.sh"
+
 work=$(mktemp -d) || refuse "cannot create a temporary directory"
 trap 'rm -rf "$work"' EXIT
 
@@ -115,32 +118,6 @@ printf '\n' >>"$work/registry.json"
 rev=$(grep -o '"rev":"[0-9a-f]*"' "$work/registry.json" | cut -d'"' -f4)
 
 # Plan every step before changing anything.
-conflicts=0
-conflict() {
-  printf 'Conflict: %s\n  Resolve: %s\n' "$1" "$2" >&2
-  conflicts=$((conflicts + 1))
-}
-recorded_sum() { awk -v p="$1" '$2 == p { s = $1 } END { print s }' "$state_dir/managed.sha256" 2>/dev/null; }
-
-declare -A action
-plan_file() {
-  local target=$1 candidate=$2 source=$3 recorded
-  recorded=$(recorded_sum "$target")
-  if [ ! -e "$target" ] && [ ! -L "$target" ]; then
-    action[$target]=installed
-  elif [ -f "$target" ] && [ ! -L "$target" ] && cmp -s "$target" "$candidate"; then
-    action[$target]=unchanged
-  elif [ -n "$recorded" ] && [ -f "$target" ] && [ ! -L "$target" ] &&
-    [ "$(sha256sum "$target" | cut -c1-64)" = "$recorded" ]; then
-    action[$target]=updated
-  elif [ -n "$recorded" ]; then
-    conflict "$target was edited locally since Nidrew last applied it; it is preserved" \
-      "move the change into $source, or remove $target, then rerun"
-  else
-    conflict "$target exists and is not managed by Nidrew; it is preserved" \
-      "compare it with $source; remove or rename it if Nidrew should own it, then rerun"
-  fi
-}
 plan_file "$conf_dir/nidrew.conf" "$template" "$template"
 plan_file "$conf_dir/registry.json" "$work/registry.json" "$lock"
 
@@ -198,24 +175,9 @@ candidate_nix --extra-experimental-features flakes registry list 2>/dev/null |
 
 # Activate: managed files first, then the include that makes nix.conf use them.
 mkdir -p "$state_dir/previous" || refuse "cannot create $state_dir"
-record() {
-  local target=$1
-  { grep -v "  $target\$" "$state_dir/managed.sha256" 2>/dev/null; sha256sum "$target"; } \
-    >"$state_dir/managed.sha256.new" && mv -f "$state_dir/managed.sha256.new" "$state_dir/managed.sha256"
-}
-replace() {
-  local target=$1 source=$2
-  cp "$source" "$target.nidrew-new" && chmod 0644 "$target.nidrew-new" &&
-    mv -f "$target.nidrew-new" "$target" || refuse "cannot write $target"
-}
 config_changed=0
 for target in "$conf_dir/nidrew.conf" "$conf_dir/registry.json"; do
-  case ${action[$target]} in
-    updated) cp -p "$target" "$state_dir/previous/${target##*/}" ;;
-  esac
-  [ "${action[$target]}" = unchanged ] || replace "$target" "$work/conf/${target##*/}"
-  record "$target"
-  printf '%s %s\n' "${action[$target]}" "$target"
+  apply_file "$target" "$work/conf/${target##*/}"
   [ "${action[$target]}" = unchanged ] || [ "$target" = "$conf_dir/registry.json" ] || config_changed=1
 done
 if [ "$includes" -eq 0 ]; then
