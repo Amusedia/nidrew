@@ -121,7 +121,30 @@ instructions into setup documentation rather than making users read the logs.
 
 ## Summary
 
+- Added `scripts/server/nix-release.conf` pinning Nix 2.35.4: installer URL,
+  installer SHA-256 (matches the published `install.sha256`), and for
+  reference the x86_64-linux tarball hash the installer embeds and checks.
+- Added `scripts/server/fetch-nix-installer.sh` (any user): downloads over
+  https only, keeps the installer only on a checksum match, never runs it.
+- Added `scripts/server/bootstrap-nix.sh` (root): verifies the pinned version
+  when installed; refuses another version, a single-user installation, or
+  partial-installation leftovers without changes, listing the paths and the
+  uninstall guide. Otherwise fetches, verifies, and runs
+  `install --daemon --yes --no-channel-add`. Without root it prints the sudo
+  command without downloading.
+- Added `scripts/server/check-nix.sh` (root): version, daemon units, `nixbld`
+  build users, `trusted-users = root`, sandbox, `nidrew` on the daemon store
+  untrusted, and a sandboxed build as `nidrew` without sudo. Documented the
+  workflow in `scripts/README.md`.
+- Verification: 7 fetch and 6 bootstrap tests pass. As root on this host, an
+  all-zero pinned checksum was refused before execution; the real run
+  installed Nix 2.35.4 and `check-nix.sh` passed (32 build users, gid 30000);
+  a rerun reported nothing to install. Leftover and other-version refusals
+  were not exercised on the host. Details in [journal-2.md](journal-2.md).
+
 ## Done
+
+6d7f1df
 
 # 4. Lock server packages and apply explicit Nix configuration
 
