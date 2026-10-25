@@ -71,6 +71,105 @@ Keep persistent build and cache services on Debian, outside disposable agent con
 * Harmonia serves the Debian Nix store as a binary cache for image builds and for runtime installs inside agent containers. Sign it with a dedicated key; consumers trust only its public key and cache.nixos.org's.
 * Skopeo inspects and transfers container images where the build and deployment workflow requires it.
 
+Debian Nix uses its local store and `cache.nixos.org` as its upstream substituter;
+it does not consume its own Harmonia endpoint. Harmonia serves paths already in
+that same Debian store, including paths downloaded or built by Debian. It does
+not fetch upstream misses. Containers try Harmonia first, then `cache.nixos.org`
+through Squid. Packages downloaded only inside a container do not automatically
+populate Debian's store and may be downloaded again by other containers. Accept
+this limitation initially; add fetch-and-retain caching only if repeated downloads
+show a meaningful cost. Debian trusts cache.nixos.org's public key; container
+consumers trust that key and the dedicated Harmonia public key.
+
+Deploy Harmonia under a dedicated `harmonia` service account with read access
+only to the Nix store and metadata it requires, plus its systemd-delivered
+signing credential. Grant no general sudo, Nix trusted-user privileges, or
+store write access. Expose one configurable cache port through the agents'
+explicitly permitted Debian service path. Windows automation discovers the
+current Debian address and passes the endpoint to deployment; do not hardcode
+WSL addresses. Restrict network access to intended consumers, including blocking
+unrelated LAN clients. Signatures establish package trust; network rules control
+who can download. Server setup implements Debian-side exposure and checks;
+later egress work implements per-agent grants and permitted routes.
+
+Use a Nix-centered installation on the server:
+
+* Bootstrap multi-user Nix with the upstream shell installer. Pin the Nix release
+  and verify the downloaded release artifact against a recorded checksum before
+  execution; do not silently resolve the latest release during setup.
+* Install Harmonia and Skopeo from the same pinned nixpkgs revision, recorded in
+  a committed server `flake.lock`.
+* Keep server and agent package pins independently updateable.
+* Apply updates explicitly, run the relevant verification checks, and record the
+  tested versions and results in the work stream's journal.
+* Document privileged installation as a user-performed step, including its
+  commands, required permissions, and verification.
+
+Use dedicated server-wide Nix defaults:
+
+* Enable `nix-command` and `flakes` system-wide.
+* Pin the system `nixpkgs` registry entry to the revision in the server lock and
+  update them together. Build scripts use explicit locked inputs rather than
+  depend on registry shorthand.
+* Set `sandbox = true` for Debian builds. Investigate sandbox failures instead
+  of silently disabling it.
+* Keep signature verification enabled, use `cache.nixos.org` as the server's
+  substituter, and do not grant additional trusted-user privileges.
+* Keep automatic acceptance of flake-provided configuration disabled.
+
+These defaults apply to all server users. Preserve unrelated configuration and
+report conflicts requiring an administrator's action. Container settings remain
+separate.
+
+### Configuration ownership
+
+The repository owns Nidrew defaults, package pins, and service templates. Users
+supply machine-specific values through script parameters with documented
+defaults. Administrators retain control of existing system configuration;
+secrets remain in their protected stores rather than configuration files.
+
+Setup manages an explicit set of files. Install Nix settings in
+`/etc/nix/nidrew.conf` and add a single include to the existing `nix.conf`,
+preserving unrelated content. Use a dedicated Harmonia systemd unit and named
+drop-ins for changes to existing installer-owned units. Manage only the named
+Nidrew Scheduled Task on Windows.
+
+Inspect before changing configuration. Leave matching settings untouched and
+update previously managed files only when they have not been locally edited.
+Preserve unexpected files and local edits; stop the affected step with the
+conflict and resolution instructions. Validate changes before activation and
+retain the previous managed configuration for recovery. Verify completed steps
+so setup can resume after partial installation. Track managed paths and
+last-applied checksums to identify local edits; keep this mechanism small.
+
+### Server accounts and storage
+
+Use `nidrew` for routine server work and the existing administrative account for
+privileged setup. Keep the server checkout and build data on Debian's Linux
+filesystem:
+
+| Purpose | Location | Ownership |
+| --- | --- | --- |
+| Operational account home | `/home/nidrew` | `nidrew` |
+| Server repository checkout | `/home/nidrew/nidrew` | `nidrew` |
+| Exported images and build reports | `/home/nidrew/artifacts` | `nidrew` |
+| System configuration | `/etc/nix/`, `/etc/harmonia/` | Administrator-managed |
+| Persistent service state, where needed | `/var/lib/<service>/` | Respective service account |
+| Regenerable service caches, where needed | `/var/cache/<service>/` | Respective service account |
+| Temporary working files | Unique directories under `/tmp` | Creating process |
+| Temporary files needed across reboot | Unique directories under `/var/tmp` | Creating process |
+
+Leave the Nix store at `/nix/store`, managed by Nix. Nix-built outputs stay there;
+copy only deliberate exports into the artifacts directory. Neither temporary
+location is durable storage; cleanup policies may remove their contents.
+
+On the current machine, Git-clone `/mnt/c/projects/nidrew` into
+`/home/nidrew/nidrew`. Transfer committed changes through Git and explicitly
+select the revision to build. Preserve the Windows checkout; uncommitted files
+are not part of the clone. Make the source repository path configurable for
+other users. Grant only the access needed to clone and fetch from that source.
+The host source is a development repository, not an agent-container mount.
+
 ## Agent Templates
 
 Each template has two files with the same base name, such as `agent.nix` and `agent.yaml`.
@@ -83,18 +182,26 @@ Every initial agent image intentionally includes all three CLIs, so templates di
 Build images with `dockerTools.buildLayeredImage` from scratch. The base provides:
 
 * A non-root agent user, `/etc/passwd`, `/bin/sh`, `/usr/bin/env`, and CA certificates.
-* Basic development tools for shell use, source control, editing, and search.
 * Single-user Nix, with `/nix` owned by the agent user.
 * A compatibility layer for prebuilt binaries: `nix-ld`, a `/lib64/ld-linux-x86-64.so.2` loader link, and a common library set (such as zlib, OpenSSL, and libstdc++) on `NIX_LD_LIBRARY_PATH`.
 * Agent instructions describing how to install packages at runtime.
 
 The agent image adds:
 
+* Development tools for shell work, source control, editing, and search, including
+  Git and ripgrep. Share their declarations across agent templates where useful.
 * Claude Code, typically used for coding.
 * Codex, typically used for brainstorming and writing.
 * GitHub Copilot CLI, typically used for search and lookup.
 
 These are the user's usual roles, not enforced assignments.
+
+Keep the base focused on runtime foundations and development tools in the agent
+layer. Server packages are a separate definition, not an inheritance of the
+agent environment. Nix operational settings, such as sandboxing, enabled
+features, registry pins, and cache trust, are separate from package selection.
+Keep server and container settings explicit: Debian uses multi-user Nix and
+upstream directly; containers use single-user Nix and Harmonia first.
 
 Use nixpkgs unstable for agent packages because they change frequently. Pin the selected revision for reproducible builds and provide an explicit update workflow. Verify CLI package availability and select the exact development toolset during implementation.
 
@@ -121,7 +228,21 @@ Each crew works toward one goal recorded in `GOAL.md` at the root of the shared 
 
 Use subscription-based access for the agent CLIs. API billing is outside the intended workflow.
 
-Store credentials in Windows Credential Manager. YAML maps required environment variables to Credential Manager key names; it contains references rather than secret values. Windows automation retrieves the values and injects them at container launch. Keep secret values out of Nix expressions, images, generated configuration files, and logs.
+Store agent tokens in Windows Credential Manager. YAML maps required environment variables to Credential Manager key names; it contains references rather than secret values. Windows automation retrieves the values and injects them at container launch. Keep secret values out of Nix expressions, images, generated configuration files, and logs.
+
+Provision Harmonia's signing key once into protected, root-owned Debian storage.
+Use systemd `LoadCredential=` to deliver it to the Harmonia service at startup;
+the routine `nidrew` account must not be able to read it. This allows Harmonia to
+restart without Windows reinjecting the key. An optional recovery copy may be
+kept in Windows Credential Manager. Document provisioning, backup, recovery, and
+deliberate rotation; setup reruns must preserve a valid key. Commit only secret
+references and public keys. Validate credential delivery and signed cache access
+as part of server setup.
+
+Apple Passwords may be used for human-managed passwords and manual login
+preparation, but automated startup must not depend on retrieving secrets from
+it. Verify Windows Credential Manager access under the actual invoking user's
+logon context when implementing credential retrieval.
 
 Intended environment variables:
 
@@ -153,6 +274,17 @@ PowerShell discovers the relevant Windows and Debian addresses rather than hardc
 Agent containers have no Windows folder mounts by default. Agents in the same container share its filesystem.
 
 ## Lifecycle and Operations
+
+Keep the Debian server running with a Windows Scheduled Task, under the owning
+Windows user's credentials, triggered at that user's Windows login, that invokes
+`wsl.exe --distribution <DebianDistribution> --exec sleep infinity`. The user
+reports this keepalive is needed on the current machine. Include its setup and
+verification in server provisioning; do not rely on service enablement alone to
+keep WSL running. Document the login trigger, Linux execution user, restart
+policy, execution time limit, and permission requirements. Verify it keeps Debian
+and its services available after interactive shells close and restores them at
+the configured trigger. Record tested WSL versions and remaining limitations;
+the keepalive does not prevent an explicit WSL shutdown or Windows shutdown.
 
 * Start order: Debian services, then the egress container, then agent containers. The start script checks each is ready before starting the next and is safe to rerun after a host restart.
 * Entry: a script opens a shell in a selected agent container.
@@ -196,6 +328,80 @@ Check each item as the piece it covers is built, using quick end-to-end checks r
 
 Report any manual steps and unresolved limitations.
 
+## Learning and Reproduction
+
+This experiment is intended for publication on GitHub so others can reproduce
+the setup or learn from its results. Keep the useful evidence as work happens,
+including failed approaches and the conditions under which they failed.
+
+Each work stream or task must create or extend the scripts needed to reproduce
+its implemented steps and verify the result. Organize scripts by where they run:
+
+* `scripts/host/*.ps1`: PowerShell on Windows for host prerequisite checks,
+  credential retrieval, address discovery, and invoking server scripts via WSL.
+* `scripts/server/*.sh`: Bash on Linux for service setup, builds, image transfers,
+  and server verification. These scripts must also be directly invocable on Linux
+  without PowerShell.
+
+Provide PowerShell entry points for Windows workflows and reuse existing entry
+points when they cover a task. Keep PowerShell thin and substantive Linux logic
+in server scripts. Use descriptive filenames; add subdirectories when needed.
+Declare Debian-specific prerequisites explicitly; support other distributions
+when a concrete need arises.
+
+Windows PowerShell scripts run as the invoking Windows user using that user's
+credentials. The current experiment's user has administrator rights; other
+users may not. Check the permissions needed for each step rather than assume
+Windows elevation or Linux sudo access. State Windows and Linux permission
+requirements separately. When permissions are missing, explain the specific
+action an administrator must perform and which steps remain available.
+
+Document invocation, prerequisites, parameters, required privileges, and any
+manual actions. Scripts must be safe to rerun and report actionable failures.
+Explicitly call out user-performed steps such as privileged sudo commands,
+browser sign-in, and other interactive login flows. Give the command or action,
+where to perform it, why it is needed, and how its result will be checked. Pause
+dependent work until the required action is completed and verified; never treat
+a prompt or an unperformed manual step as successful setup.
+Link the scripts and verification results from the work stream's records rather
+than leave procedures only in a journal or terminal history.
+
+Use a small set of records with distinct purposes:
+
+* `work/<name>/plan.md` records the problem, scope, behavior contract, decisions,
+  and open questions. It serves as the work stream's specification and proposal.
+* `work/<name>/checklist.md` tracks implementation and verification progress.
+* `work/<name>/journal.md` records lessons and evidence. Start with a short
+  findings summary linking to relevant entries, then add dated entries when a
+  meaningful result changes what we know. Do not transcribe every command or
+  conversation.
+
+Each journal entry should state the question, relevant environment and versions,
+what was tried, the observed result, and the resulting lesson. Include the small
+command sequence, test, commit, or source link needed to check the result. State
+what remains unverified. Explain what a reproducer can skip, under which
+conditions, and which verification they still need to run. Keep credentials and
+private machine details out of these public records.
+
+Promote settled setup instructions into the setup documentation as it is written;
+link to the journal for evidence and history. Keep current decisions in the plan
+and mark older journal conclusions as superseded when they change.
+
+Separate specs, architecture decision records (ADRs), and requests for comments
+(RFCs) are optional. Keep local decisions in the plan. Extract a spec when a
+stable interface needs a reference shared by several work streams, or an ADR when
+a consequential decision needs a durable explanation across work streams. Link
+to that record instead of maintaining duplicate accounts. Discuss proposals in
+the plan or a GitHub issue; add a separate RFC only when a proposal needs broader
+review before adoption.
+
+To save reading time and agent tokens, start with this README, then the relevant
+setup instructions and checks. For development, read the work stream's plan and
+checklist. Read the journal's findings summary and follow only the entries needed
+to investigate a failure or reassess a decision. Historical experiments can be
+skipped when following the documented path, but still run its applicable checks
+and revisit evidence when versions or environment assumptions differ.
+
 ## Roadmap
 
 ### v2: Operations and caching
@@ -203,7 +409,7 @@ Report any manual steps and unresolved limitations.
 * Nexus CE package caching for npm, PyPI, and NuGet, possibly Maven and Cargo, with optional Docker registry caching. Verify support in the deployed Nexus CE version and edition.
 * Per-container CPU, memory, disk, and concurrency limits declared in YAML.
 * Cache maintenance: storage limits, retention, garbage collection, and health checks.
-* Automatic startup of Debian services and egress at Windows sign-in, such as a current-user Scheduled Task. Validate the mechanism before adopting it.
+* Automatic startup of egress at Windows sign-in, beyond the Debian server keepalive included in initial server setup.
 * Optional read-only or writable project and artifact mounts declared in YAML.
 * Collection of non-git outputs such as build artifacts, test reports, and logs.
 
