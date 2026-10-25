@@ -6,9 +6,16 @@ The user directs the work and decides when the goal is complete. Agents share a 
 
 ## Status
 
-This README defines the initial scope and intended architecture. Setup scripts, image definitions, and runtime configuration are not implemented yet.
+This README defines the initial scope and intended architecture. Setup scripts, image definitions, and runtime configuration are not implemented in this repository yet.
 
-`wslc` has been verified in a separate environment: it runs Nix-built OCI images, gives each container its own network namespace (separate from the WSL VM), and can restrict an agent container's network to the egress container. Re-verify these on the target machine during prerequisite checks. Record the experiment's versions, commands, networking configuration, results, and limits in the repository when available so it can be reproduced.
+A proof of concept elsewhere has shown the core path works: it built a NixOS-based image from an `agent-x.nix` and `agent-x.yaml` pair, ran it through `wslc` with its own network namespace limited to an egress container, and had Claude Code complete a small task inside it. Build on that result instead of re-proving it.
+
+Not yet exercised:
+
+* Codex and GitHub Copilot CLI in the container.
+* The from-scratch base image instead of a NixOS base. If it hits a blocking problem, fall back to the NixOS base and record the reason.
+
+Treat these as ordinary implementation work, checked as they are built, not as separate experiments.
 
 ## Concepts
 
@@ -43,7 +50,7 @@ Not protected in the initial version:
 * A malicious or prompt-injected agent acting within its granted access.
 * Competition for host CPU, memory, and disk; resource limits are v2 scope.
 
-Agent containers must not run Windows executables or reach Windows interop. Verify this for the chosen runtime rather than assuming it.
+Agent containers must not run Windows executables or reach Windows interop.
 
 ## Architecture
 
@@ -124,7 +131,7 @@ Intended environment variables:
 | Codex | `CODEX_ACCESS_TOKEN` | Subscription access token |
 | GitHub Copilot CLI | `GH_TOKEN` | Fine-grained token with Copilot access |
 
-Before implementing injection, verify each variable name, the token lifetime and refresh behavior, and that each CLI accepts it for subscription access. Scope `GH_TOKEN` to the minimum permissions, since `gh` and git also use it. Do not substitute an API key when subscription sign-in requires a different flow. Use only documented provider interfaces. If a CLI has no supported variable for subscription access, sign in once inside the container; its credential directory persists with container state. Document any required manual browser sign-in or credential preparation.
+The Claude Code variable works in the proof of concept. Confirm the Codex and Copilot variables, and how long their tokens last, while integrating each CLI. Scope `GH_TOKEN` to the minimum permissions, since `gh` and git also use it. Do not substitute an API key when subscription sign-in requires a different flow. Use only documented provider interfaces. If a CLI has no supported variable for subscription access, sign in once inside the container; its credential directory persists with container state. Document any required manual browser sign-in or credential preparation.
 
 To rotate an injected credential, update Credential Manager, push outstanding work, and recreate the container. Revoke a compromised token at its provider.
 
@@ -141,14 +148,14 @@ Access to local systems is restricted:
 * Preserve each agent container's permissions through shared egress: give each agent container a stable address and apply per-source Squid ACLs and per-agent socat listeners. Do not combine all templates' permissions into a global allowlist.
 * Enforce the boundary outside agent containers. Proxy environment variables alone do not enforce isolation.
 
-PowerShell discovers the relevant Windows and Debian addresses rather than hardcoding them. Validate the enforcement mechanism against the installed `wslc` and WSL networking configuration, including direct-connection bypasses and IPv4/IPv6 behavior.
+PowerShell discovers the relevant Windows and Debian addresses rather than hardcoding them.
 
 Agent containers have no Windows folder mounts by default. Agents in the same container share its filesystem.
 
 ## Lifecycle and Operations
 
 * Start order: Debian services, then the egress container, then agent containers. The start script checks each is ready before starting the next and is safe to rerun after a host restart.
-* Entry: a script opens a shell in a selected agent container. Verify that the agent CLIs' commands and file edits run inside the container, not on the host.
+* Entry: a script opens a shell in a selected agent container.
 * Output: only work pushed to the host git remote is retained. Uncommitted, untracked, and ignored files, build artifacts, and logs are lost when the container is deleted.
 * Teardown: the delete script lists uncommitted changes and unpushed commits and refuses to delete while they exist unless the user confirms. A failed push leaves the container in place. Teardown removes only the container; it never removes Debian caches, host git repositories, Credential Manager entries, or images without a separate, confirmed request.
 
@@ -172,13 +179,13 @@ Scripts should be safe to rerun and explain any required manual actions. When Co
 
 The first milestone is complete when Windows scripts can set up Debian services, build a selected agent image, and deploy a usable container through `wslc`.
 
-Verify that:
+Check each item as the piece it covers is built, using quick end-to-end checks rather than separate experiments:
 
 * All three CLIs work with the intended subscription credentials.
 * The Harmonia substituter is usable and signed, and consumers reject unsigned paths.
 * An agent can install a Nix package at runtime as the non-root user, using Harmonia first and cache.nixos.org second.
 * A prebuilt binary or Python wheel installed at runtime runs through the compatibility layer.
-* Permitted local ports are reachable and unpermitted local destinations are blocked.
+* Permitted local ports are reachable and unpermitted local destinations are blocked, including direct connections that skip the proxy and IPv6.
 * One agent container's permissions do not grant access to another's permitted services.
 * No Windows folders are mounted by default, and the container cannot run Windows executables.
 * The start script brings up Debian services, egress, and an agent container in order after a host restart.
