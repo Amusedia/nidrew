@@ -80,7 +80,32 @@ instructions into setup documentation rather than making users read the logs.
 
 ## Summary
 
+- Added `scripts/server/provision-account.sh` (root; `--source`,
+  `--revision`): creates `nidrew` with a locked password and no sudo,
+  `/home/nidrew` (0700) and `/home/nidrew/artifacts` (0750), refuses on another
+  home, administrative groups or sudo rules, or wrongly owned directories, then
+  runs the sync as `nidrew`. Without root it prints the exact sudo command.
+- Added `scripts/server/sync-checkout.sh` (`nidrew`; `--source`, `--checkout`,
+  `--revision`): `--no-local` clone with independent objects, fetch into an
+  existing clone, detached checkout of the selected commit recorded as
+  `refs/nidrew/selected`. Refuses other content at the path, another origin,
+  uncommitted changes, in-progress operations, and orphaning commits; reports
+  uncommitted source edits that are not transferred.
+- Source access: Git refuses a source owned by another user in `upload-pack`
+  and drops `-c` settings there, so the clone stores a trusting
+  `remote.origin.uploadpack`; no global Git configuration. The server keeps
+  the default writable `/mnt/c` mount by decision.
+- Added `scripts/server/check-account.sh` (root, read-only) and documented the
+  workflow in `scripts/README.md`.
+- Verification: 15 sync tests and 2 non-root provisioning tests pass. On this
+  host, provisioning selected 2b54b90; `check-account.sh` passed; a matching
+  sync and provisioning rerun changed nothing; local changes were refused and
+  kept. Conflict refusals in provisioning were not exercised on the host.
+  Details in [journal-2.md](journal-2.md).
+
 ## Done
+
+37ccdc6, 2b54b90, 974ac2d
 
 # 3. Bootstrap pinned multi-user Nix
 
