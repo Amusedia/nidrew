@@ -168,7 +168,35 @@ instructions into setup documentation rather than making users read the logs.
 
 ## Summary
 
+- Added `nix/server/flake.nix` and its committed `flake.lock`, pinning
+  `nixos-26.05` at 1f607aa: Harmonia 3.1.0 and Skopeo 1.22.2, combined in the
+  `default` package installed as `/nix/var/nix/profiles/nidrew-server`.
+- Added `nix/server/nidrew.conf` with the required settings and
+  `cache.nixos.org` substitution; no trusted users or Harmonia substituter.
+- Added `scripts/server/apply-nix-config.sh` (root): installs
+  `/etc/nix/nidrew.conf`, a system `registry.json` generated from the lock,
+  and one `include nidrew.conf` in `nix.conf`. Records checksums in
+  `/var/lib/nidrew/managed.sha256` and previous files in
+  `/var/lib/nidrew/previous/`. Plans all files first: local edits, unexpected
+  files, and managed keys in `nix.conf` stop the run unchanged. Validates the
+  full candidate configuration with `NIX_CONF_DIR`, restarts the daemon when
+  it predates its configuration, and builds the profile without updating the
+  lock. Reruns resume partial applies.
+- Added `scripts/server/check-nix-config.sh` (root): runs `check-nix.sh`, then
+  checks files, effective settings for `nidrew`, daemon restart, registry and
+  `<nixpkgs>` against the lock, no channels, the profile, and Skopeo
+  inspecting and copying a digest-pinned busybox image as `nidrew` into a
+  temporary directory.
+- Added `scripts/server/update-server-lock.sh` for deliberate pin updates and
+  documented the workflow and managed files in `scripts/README.md`.
+- Verification: 23 file-management tests pass. On this host, apply and check
+  passed, a rerun changed nothing, and a local edit was refused and kept.
+  Not exercised on the host: lock update, template update, and `nix.conf`
+  conflicts. Details in [journal-2.md](journal-2.md).
+
 ## Done
+
+2058fd8, 72b52ea, c50fa7c
 
 # 5. Run Harmonia with protected signing credentials
 
