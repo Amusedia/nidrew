@@ -8,10 +8,13 @@ records implementation lessons from the [checklist](checklist.md).
 - Run the prerequisite checks with `scripts/host/check-prerequisites.ps1` from
   Windows, or `scripts/server/check-prerequisites.sh` directly in Debian. Both
   change nothing and need no administrator rights.
+- Require WSL 3.0.3 or later, the tested version. WSL containers (`wslc`)
+  need 2.9 or later; asking for the tested version avoids untested ranges.
 - A Windows checkout with `core.autocrlf=true` contains CRLF files. Linux Git
   reports every such file as modified, and `git status` still does so with
   `-c core.autocrlf=true`, because it treats a size change as a modification.
-  Use `git diff` with `core.autocrlf=true` to find real uncommitted edits.
+  Use `git diff` with `core.autocrlf=true` to find real uncommitted edits, and
+  `core.safecrlf=false` to silence conversion warnings for LF working files.
 - Shell scripts must keep LF endings in the Windows checkout because Debian
   runs them from `/mnt/c`; `.gitattributes` enforces `*.sh text eol=lf`.
 - Commands run through `wsl.exe --distribution Debian --exec ...` from the
@@ -42,7 +45,8 @@ Observed on this machine: systemd 257 running as PID 1, Bash 5.2.37, Git
 2.47.3, curl 8.14.1, coreutils 9.7, GNU tar 1.35, and XZ Utils 5.8.1. `peijen`
 is in group `sudo` and sudo requires a password. The current user can query
 Task Scheduler without elevation. The unknown distribution produced a failure
-with the installed distribution names and exit status 1.
+with the installed distribution names and exit status 1. Raising
+`-MinimumWslVersion` to 3.0.4 failed the WSL check with the update command.
 
 Not performed: no interactive sudo command was run. The bus-denied,
 no_new_privs, sudo-denied, and missing-tool outputs were verified with stub

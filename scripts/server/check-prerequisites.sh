@@ -192,8 +192,9 @@ else
       # A Windows checkout with core.autocrlf has CRLF files that Linux Git
       # would report as modified; the clone receives committed content only.
       # Use diff rather than status, which treats a size change as modified.
+      # Suppress line-ending conversion warnings for LF working files.
       changes=$({
-        git -C "$source_path" -c core.autocrlf=true diff --name-only HEAD
+        git -C "$source_path" -c core.autocrlf=true -c core.safecrlf=false diff --name-only HEAD
         git -C "$source_path" ls-files --others --exclude-standard
       } | grep -c .)
       if [ "$changes" -gt 0 ]; then

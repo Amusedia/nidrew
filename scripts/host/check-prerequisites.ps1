@@ -19,7 +19,9 @@ param(
     # Source Git repository as seen from Linux.
     [string]$Source = '/mnt/c/projects/nidrew',
     # Committed revision the server clone will use.
-    [string]$Revision = 'HEAD'
+    [string]$Revision = 'HEAD',
+    # Minimum WSL version; the tested version. wslc requires 2.9 or later.
+    [version]$MinimumWslVersion = '3.0.3'
 )
 
 $script:failures = 0
@@ -49,12 +51,20 @@ if (-not (Get-Command wsl.exe -ErrorAction SilentlyContinue)) {
     Fail 'wsl' 'wsl.exe not found'
     $script:actions += 'Install WSL from an administrator PowerShell: wsl.exe --install --distribution Debian'
 } else {
+    # wslc (WSL containers) needs WSL 2.9 or later; Nidrew is tested with 3.0.3.
     $version = & wsl.exe --version 2>&1
-    if ($LASTEXITCODE -eq 0) {
-        Report ' ok ' 'wsl' (($version | Select-Object -First 1) -replace '^\D*', '')
+    $parsed = $null
+    if ($LASTEXITCODE -eq 0 -and
+        [version]::TryParse((($version | Select-Object -First 1) -replace '^\D*', '').Trim(), [ref]$parsed)) {
+        if ($parsed -ge $MinimumWslVersion) {
+            Report ' ok ' 'wsl' $parsed.ToString()
+        } else {
+            Fail 'wsl' ('{0} is older than the tested {1}' -f $parsed, $MinimumWslVersion)
+            $script:actions += "Update WSL to $MinimumWslVersion or later: wsl.exe --update"
+        }
     } else {
-        Report 'warn' 'wsl' 'wsl.exe --version failed; this may be the inbox WSL'
-        $script:actions += 'Update WSL: wsl.exe --update'
+        Fail 'wsl' 'wsl.exe --version did not report a version; this may be the inbox WSL'
+        $script:actions += "Update WSL to $MinimumWslVersion or later: wsl.exe --update"
     }
 
     $list = & wsl.exe --list --verbose 2>&1

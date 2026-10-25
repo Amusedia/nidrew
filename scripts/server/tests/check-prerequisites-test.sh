@@ -71,6 +71,12 @@ expect_output() {
   return 1
 }
 
+expect_no_output() {
+  if ! printf '%s\n' "$output" | grep -qF -- "$2"; then return 0; fi
+  printf '  expected no output containing: %s\n' "$2"
+  return 1
+}
+
 check() {
   local name=$1
   shift
@@ -163,12 +169,16 @@ check "uncommitted source edits are reported" t_dirty_source
 t_crlf_source() {
   make_bin "$bin" ok running
   printf 'line\n' >"$repo/text.txt"
-  git -C "$repo" add text.txt
+  printf 'line\n' >"$repo/text-lf.txt"
+  git -C "$repo" add text.txt text-lf.txt
   git -C "$repo" -c user.name=t -c user.email=t@example.invalid commit -q -m text
   printf 'line\r\n' >"$repo/text.txt"
+  # An LF file whose stat changed makes Git recheck it under core.autocrlf.
+  touch -d '+1 hour' "$repo/text-lf.txt" 2>/dev/null || true
   run_checker "$bin" --source "$repo"
   git -C "$repo" checkout -q -- text.txt
-  expect_output x "[ ok ] source changes: working tree clean"
+  expect_output x "[ ok ] source changes: working tree clean" &&
+    expect_no_output x "warning:"
 }
 check "Windows CRLF checkouts are not reported as edits" t_crlf_source
 

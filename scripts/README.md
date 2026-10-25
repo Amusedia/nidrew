@@ -6,8 +6,11 @@ directly on Linux without PowerShell.
 
 | Script | Runs in | Purpose |
 | --- | --- | --- |
-| [host/check-prerequisites.ps1](host/check-prerequisites.ps1) | Windows PowerShell, invoking user | Check WSL and the distribution, then run the Debian checks |
+| [host/check-prerequisites.ps1](host/check-prerequisites.ps1) | Windows PowerShell, invoking user | Check WSL 3.0.3 or later and the distribution, then run the Debian checks |
 | [server/check-prerequisites.sh](server/check-prerequisites.sh) | Debian, administrative account | Check systemd, tools, sudo access, and the source revision |
+
+WSL containers (`wslc`) require WSL 2.9 or later. The host check requires the
+tested WSL 3.0.3 or later; update with `wsl.exe --update`.
 
 Neither check changes the system or needs administrator rights. Each prints
 `[ ok ]`, `[warn]`, `[FAIL]`, or `[skip]` lines, then any manual actions with
