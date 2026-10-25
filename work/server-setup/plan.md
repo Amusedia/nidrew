@@ -328,6 +328,9 @@ configuration remain implementation questions.
   Restrict Debian-side access to intended consumers and block unrelated LAN
   clients; implement per-agent grants and routes in later egress work. Signing
   establishes package trust and does not replace network access restrictions.
+- Keep the signing key at `/etc/harmonia/secret-key` (root:root 0600) with
+  `/etc/harmonia/public-key` published beside it. Run `harmonia-cache` from
+  `harmonia.socket` on `127.0.0.1:5000` until item 6 exposes the endpoint.
 - Store Harmonia's operational signing key in protected root-owned Debian
   storage, provisioned once, and pass it through systemd `LoadCredential=`.
   An optional recovery copy can live in Windows Credential Manager. Preserve

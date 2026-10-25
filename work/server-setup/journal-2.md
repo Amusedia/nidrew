@@ -47,6 +47,65 @@ records implementation lessons from the [checklist](checklist.md).
   `fetch-tree`; compare features as a set.
 - From Git Bash, pass `MSYS_NO_PATHCONV=1` to `wsl.exe` so Linux paths such as
   `/tmp/...` are not rewritten into Windows paths.
+- Harmonia 3.1.0 `harmonia-cache` reads `/nix/var/nix/db/db.sqlite` directly
+  (world-readable after the installer) and needs no daemon socket, store
+  write access, or trust; it takes its key from `SIGN_KEY_PATHS` and exits 1
+  on a missing key without printing key material. It accepts a
+  systemd-inherited socket and supports `Type=notify` with a watchdog.
+- A failing `Restart=on-failure` service hits the start limit within about a
+  second; the limit also fails its socket and refuses later starts until
+  `reset-failed`. `RestartSec=5` keeps retries under the limit. Meanwhile the
+  socket accepts and holds connections, so clients need time limits.
+- Windows PowerShell 5.1 sends a UTF-8 byte order mark to child standard
+  input, through pipelines and `Process` alike, unless
+  `[Console]::InputEncoding` is UTF-8 without one.
+
+## 2026-10-25: Harmonia service and signing key (checklist item 5)
+
+Environment: as for item 4; systemd 257. Harmonia 3.1.0 from the server lock.
+Key `nidrew-pling-1:0ExDE4UoQWcn7UhE5Jr7xesP+FsJS17leDIJnm5FWG0=` (public).
+
+Checks performed:
+
+```sh
+scripts/server/tests/setup-harmonia-test.sh      # 33 passed
+scripts/server/tests/apply-nix-config-test.sh    # 23 passed after the refactor
+sudo bash /home/nidrew/nidrew/scripts/server/setup-harmonia.sh       # twice
+sudo bash /home/nidrew/nidrew/scripts/server/check-harmonia.sh --restart
+# move secret-key aside, restart, check; move it back, wait 8 s, check
+```
+
+```powershell
+# throwaway key and target, as peijen in /tmp
+harmonia-key-recovery.ps1 -Action Save|Restore -LinuxUser peijen -KeyPath ... -Target nidrew-test-recovery
+```
+
+Observed: setup created `harmonia` (uid 994, `/usr/sbin/nologin`, only group
+`harmonia`), generated the key (root:root 0600) and public key, and started
+the socket-activated service on `127.0.0.1:5000` only. As `nidrew`, `nix store
+verify` of the locally built `nidrew-server` path from the cache passed with
+the public key and reported "untrusted" with only the upstream key. Neither
+`nidrew` nor `harmonia` could read the key file; the key value was absent from
+the units, configuration, and journal. Reruns kept the key and changed nothing;
+`--restart` served again from the Debian key copy. With the key moved aside the
+service failed at step CREDENTIALS ("Protocol error", status 243) and the check
+failed; restoring it recovered the service within 8 s without intervention.
+The Credential Manager round trip restored identical bytes with mode 0600 and
+refused to replace an existing file.
+
+Failed first attempts: without `RestartSec`, the missing-key test hit the start
+limit, failed `harmonia.socket`, and the restart after restoring the key was
+refused (fixed in 6595a9e). The check then hung in `curl` against the held
+socket (fixed in 7f42446). The first recovery script added a byte order mark
+to the restored key.
+
+Not performed: the recovery script against the real key as root, rotation,
+conflicting existing `harmonia` accounts, and a Debian restart (item 8).
+Harmonia warns that the systemd credential copy has mode 0440; it is visible
+only inside the service.
+
+What can be skipped: readers do not need `harmonia-daemon` or a Nix daemon
+socket for the cache, or `DynamicUser`.
 
 ## 2026-10-25: Server Nix configuration and packages (checklist item 4)
 
