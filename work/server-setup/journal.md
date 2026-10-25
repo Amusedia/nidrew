@@ -1,5 +1,8 @@
 # Server Setup Journal
 
+This file holds the planning history. Implementation lessons continue in
+[journal-2.md](journal-2.md).
+
 ## Findings
 
 - [Harmonia deployment](#2026-10-25-harmonia-deployment):

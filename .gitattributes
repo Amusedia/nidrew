@@ -1,0 +1,2 @@
+# Debian runs scripts directly from the Windows checkout; keep LF endings.
+*.sh text eol=lf
