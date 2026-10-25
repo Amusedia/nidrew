@@ -20,6 +20,13 @@ records implementation lessons from the [checklist](checklist.md).
 - Commands run through `wsl.exe --distribution Debian --exec ...` from the
   Claude desktop session on Windows reached the system bus; the restriction
   noted in journal.md came from a different, sandboxed Linux session.
+- A local clone or fetch from a repository owned by another user fails in
+  `upload-pack` with "dubious ownership" for the source `.git` path. Git drops
+  `-c safe.directory=...` for local transports, so pass a trusting command with
+  `--upload-pack` and store it as `remote.origin.uploadpack` in the clone.
+- `/mnt/c` is drvfs mounted without metadata, so every Linux user can read and
+  write the source checkout. This is accepted for the server; the restriction
+  of `/mnt/c` applies to agent containers.
 - `wsl.exe` writes its own messages as UTF-16 unless `WSL_UTF8=1` is set.
   Windows PowerShell 5.1 also mangles inline `bash -c` scripts containing
   double quotes; run script files with `--exec bash <path> <args>` instead.
@@ -56,3 +63,35 @@ tools. A Windows user who cannot query Task Scheduler was not tested.
 What can be skipped: a reader whose check reports no failures can continue to
 the account setup. A Debian instance without systemd needs `/etc/wsl.conf`
 changes and `wsl.exe --shutdown` first, as the check prints.
+
+## 2026-10-25: Account and server checkout (checklist item 2)
+
+Environment: as for item 1; Git 2.47.3 in Debian. `/mnt/c` is a 9p drvfs
+mount with `uid=1000,gid=1000` and mode 777 files.
+
+Checks performed:
+
+```sh
+scripts/server/tests/sync-checkout-test.sh       # 15 passed
+scripts/server/tests/provision-account-test.sh   # 2 passed (non-root only)
+sudo bash scripts/server/provision-account.sh --source /mnt/c/projects/nidrew --revision HEAD
+sudo bash scripts/server/check-account.sh
+```
+
+Observed: the first provisioning run created `nidrew` (uid 1001, gid 1002)
+and its directories, then the clone failed with "dubious ownership" for
+`/mnt/c/projects/nidrew/.git`. The ownership test with
+`GIT_TEST_ASSUME_DIFFERENT_OWNER=1` reproduced it; `-c safe.directory` on the
+clone did not help, and `--upload-pack` with the trusting command did. The
+rerun reused the account and directories and selected 2b54b90. As root:
+`check-account.sh` passed; `nidrew` is only in group `nidrew`, has no sudo
+privileges and no global Git configuration, and could not write to `/etc`. A
+matching sync and a provisioning rerun reported "already at"; sync with an
+untracked file in the checkout was refused and the file was kept.
+
+Not performed: provisioning with conflicting existing state (another home,
+administrative group membership, wrongly owned directories) ran only through
+code review, not on a host.
+
+What can be skipped: readers can use `--upload-pack` directly instead of
+trying `-c safe.directory` or global `safe.directory` configuration.
