@@ -14,6 +14,9 @@ directly on Linux without PowerShell.
 | [server/bootstrap-nix.sh](server/bootstrap-nix.sh) | Debian, root through sudo | Install the pinned multi-user Nix after verifying the installer |
 | [server/fetch-nix-installer.sh](server/fetch-nix-installer.sh) | Debian, any user | Download the pinned Nix installer and verify its checksum |
 | [server/check-nix.sh](server/check-nix.sh) | Debian, root through sudo | Check the Nix version, daemon, build users, trust, and a build as `nidrew` |
+| [server/apply-nix-config.sh](server/apply-nix-config.sh) | Debian, root through sudo | Apply the server Nix settings and registry, and build the locked server packages |
+| [server/check-nix-config.sh](server/check-nix-config.sh) | Debian, root through sudo | Check settings, registry, `<nixpkgs>`, packages, and Skopeo as `nidrew` |
+| [server/update-server-lock.sh](server/update-server-lock.sh) | Debian, ordinary user in the source checkout | Deliberately update the server nixpkgs pin |
 
 WSL containers (`wslc`) require WSL 2.9 or later. The host check requires the
 tested WSL 3.0.3 or later; update with `wsl.exe --update`.
@@ -91,3 +94,61 @@ sudo bash /mnt/c/projects/nidrew/scripts/server/check-nix.sh
 `nidrew` builds through the daemon without sudo and is not a trusted user.
 Change the pin only deliberately, then rerun the checks and record the result
 in the work journal.
+
+## Server Nix configuration and packages
+
+[../nix/server/flake.nix](../nix/server/flake.nix) defines Harmonia and Skopeo
+from one nixpkgs input pinned in the committed
+[../nix/server/flake.lock](../nix/server/flake.lock), independent of agent
+pins. [../nix/server/nidrew.conf](../nix/server/nidrew.conf) holds the
+server-wide settings: `nix-command` and `flakes`, `sandbox = true`,
+`require-sigs = true`, `accept-flake-config = false`,
+`nix-path = nixpkgs=flake:nixpkgs`, and `cache.nixos.org` with its key. No
+trusted users are added and the server does not use its own Harmonia.
+
+Commit changes first and select them in the server checkout, then apply from
+that checkout as an administrator:
+
+```sh
+sudo -u nidrew -i bash /home/nidrew/nidrew/scripts/server/sync-checkout.sh --revision <commit>
+sudo bash /home/nidrew/nidrew/scripts/server/apply-nix-config.sh
+sudo bash /home/nidrew/nidrew/scripts/server/check-nix-config.sh
+```
+
+Apply manages exactly these files:
+
+| Path | Content |
+| --- | --- |
+| `/etc/nix/nidrew.conf` | Copy of `nix/server/nidrew.conf` |
+| `/etc/nix/registry.json` | System registry pinning `nixpkgs` to the locked revision |
+| `/etc/nix/nix.conf` | One added line, `include nidrew.conf`; other content is kept |
+| `/var/lib/nidrew/managed.sha256` | Last-applied checksums of the managed files |
+| `/var/lib/nidrew/previous/` | The previous version of each file apply replaced |
+| `/nix/var/nix/profiles/nidrew-server` | Profile with `bin/harmonia` and `bin/skopeo` |
+
+Apply plans every file before changing any. Matching files are left alone and
+unchanged managed files are updated. A managed file edited locally, an
+existing file Nidrew did not write, or a `nix.conf` line setting a managed key
+stops the run without changes and names the resolution. The complete candidate
+configuration is validated in a temporary directory before activation. Apply
+restarts `nix-daemon.service` when it predates its configuration, and builds
+the profile with `--no-update-lock-file`. Reruns resume an interrupted apply.
+To recover, copy a file from `/var/lib/nidrew/previous/` back and rerun the
+check, or roll back the profile with
+`sudo nix-env --profile /nix/var/nix/profiles/nidrew-server --rollback`.
+
+The check runs `check-nix.sh`, then verifies the files, the effective settings
+for `nidrew`, the daemon restart, that `flake:nixpkgs` and `<nixpkgs>` resolve
+to the locked revision without channels, the profile, and that `nidrew` can
+inspect and copy a digest-pinned busybox image with Skopeo into a temporary
+directory. It needs network access.
+
+Update the pin only deliberately, in the source checkout:
+
+```sh
+scripts/server/update-server-lock.sh
+```
+
+It prints the old and new nixpkgs revision and tool versions and the steps to
+commit, sync, apply, check, and record the result in the work journal. To
+update Nix itself, change `server/nix-release.conf` the same way.

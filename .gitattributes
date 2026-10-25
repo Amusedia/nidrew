@@ -2,3 +2,5 @@
 *.sh text eol=lf
 # Debian reads the release pin from the Windows checkout; keep LF endings.
 scripts/server/*.conf text eol=lf
+# Nix reads server packages from both checkouts; keep LF endings.
+nix/** text eol=lf
