@@ -361,4 +361,31 @@ bd5ecbb, 68ff20e
 
 ## Summary
 
+- Added `scripts/server/setup-server.sh` (root; `--source`, `--revision`,
+  `--port`, `--key-name`): runs provisioning from the source checkout, then
+  bootstrap, apply, and Harmonia setup from the server checkout at the
+  selected revision, stopping at the first failure with the step and the
+  rerun command. Added `scripts/server/check-server.sh` (root; `--port`):
+  runs the account, Nix configuration, and Harmonia checks and summarizes.
+- Added `scripts/host/setup-server.ps1` (prerequisites, Debian setup through
+  `wsl.exe --user root`, keepalive Register and Start, readiness) and
+  `scripts/host/check-server.ps1` (Debian checks, keepalive status, endpoint
+  and public key from Windows).
+- Added a reproduction section to `scripts/README.md` with prerequisites,
+  parameters, privileges, Linux commands, and manual actions, and a behavior
+  contract review in [journal-2.md](journal-2.md).
+- Verification: 17 orchestration tests and all other server tests pass. On
+  this host the complete setup from Windows reported the server ready; a
+  rerun changed nothing but a daemon restart and kept a local `nix.conf`
+  line; runs interrupted in steps 3 and 4 resumed. After the user's Windows
+  restart the keepalive started Debian with Nix and Harmonia active, and the
+  signed cache checks passed in that instance. The first host run found that
+  the wrapper hid child output and failures (fixed in a1027da).
+- Limitations: two of six logons did not start the keepalive; no real pin
+  update, key rotation, LAN client, or per-agent access was exercised.
+  Container, CLI, and egress milestones remain separate work; GOAL.md is not
+  complete.
+
 ## Done
+
+ce1ce06, a1027da, 9f5692b
