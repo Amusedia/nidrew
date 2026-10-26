@@ -328,13 +328,19 @@ cd3cf49, 6595a9e, 7f42446, f2508a5
   without a window and a second Start did not duplicate it; Debian had one
   `sleep infinity` as `nidrew`; a foreign task was kept; a changed setting
   was detected and restored; Stop ended the processes and the sleep.
-- Pending user-performed checks: the logon trigger after sign-out and sign-in,
-  a Windows restart, sleep and resume, and `wsl.exe --shutdown`. Debian
-  stopping without the keepalive was not observed, because Docker Desktop and
-  the Claude bridge keep their own WSL clients. Details in
-  [journal-2.md](journal-2.md).
+- User-performed checks on 2026-10-26: sign-out stops Debian; the logon
+  trigger restored it at three logons, including after a restart, with Nix
+  and Harmonia active; sleep and resume kept it running; after
+  `wsl.exe --shutdown` it stayed stopped until `-Action Start`.
+- Limitations: two of six logons did not start Debian, cause unknown because
+  Task Scheduler history needs an administrator to enable; recovery is
+  `-Action Start`. Debian stopping without the keepalive was not observed,
+  because Docker Desktop and the Claude bridge keep their own WSL clients.
+  Details in [journal-2.md](journal-2.md).
 
 ## Done
+
+bd5ecbb, 68ff20e
 
 # 8. Complete reproducible setup, recovery checks, and user documentation
 
