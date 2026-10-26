@@ -83,9 +83,15 @@ check "public key has mode 644" '[ "$(stat -c %a "$etc/public-key")" = 644 ]'
 check "output publishes the public key" 'printf "%s\n" "$output" | grep -qF "$(cat "$etc/public-key")"'
 secret_value=$(cut -d: -f2 "$etc/secret-key")
 check "output does not contain the secret key" '! printf "%s\n" "$output" | grep -qF "$secret_value"'
-for file in "$etc/harmonia.toml" "$units/harmonia.service" "$units/harmonia.socket"; do
-  check "installs ${file##*/}" 'cmp -s "$file" "$repo_dir/scripts/server/harmonia/${file##*/}"'
+rendered() { sed "s/@PORT@/$1/g" "$repo_dir/scripts/server/harmonia/$2"; }
+for file in "$etc/harmonia.toml" "$etc/firewall.sh" "$units/harmonia.service" "$units/harmonia.socket" \
+  "$units/harmonia-firewall.service"; do
+  check "installs ${file##*/} for port 5000" 'rendered 5000 "${file##*/}" | cmp -s "$file" -'
 done
+check "socket listens on all addresses at port 5000" 'grep -qx "ListenStream=\[::\]:5000" "$units/harmonia.socket"'
+check "socket starts only with the port restrictions" \
+  'grep -qx "BindsTo=harmonia-firewall.service" "$units/harmonia.socket" && grep -qx "After=harmonia-firewall.service" "$units/harmonia.socket"'
+check "firewall unit restricts port 5000" 'grep -q "firewall.sh start 5000\$" "$units/harmonia-firewall.service"'
 check "unit and config checksums are recorded" \
   'grep -q " $units/harmonia.service\$" "$state/managed.sha256" && grep -q " $etc/harmonia.toml\$" "$state/managed.sha256"'
 check "service file holds only the key reference" '! grep -qF "$secret_value" "$units/harmonia.service"'
@@ -135,6 +141,21 @@ before=$(snapshot)
 run_setup
 expect "local unit edit is refused" 1 "edited locally"
 check "local unit edit is preserved" '[ "$(snapshot)" = "$before" ]'
+
+reset
+run_setup >/dev/null
+run_setup --port 5001
+expect "a port change updates the managed files" 0 "updated $units/harmonia.socket"
+check "socket uses the new port" 'grep -qx "ListenStream=\[::\]:5001" "$units/harmonia.socket"'
+check "firewall uses the new port" 'grep -q "firewall.sh start 5001\$" "$units/harmonia-firewall.service"'
+check "configuration uses the new port" 'grep -qF "[::]:5001" "$etc/harmonia.toml"'
+check "previous socket unit is retained" 'grep -qx "ListenStream=\[::\]:5000" "$state/previous/harmonia.socket"'
+
+for port in 0 65536 50x; do
+  output=$(bash "$setup" --files-only --harmonia-dir "$etc" --unit-dir "$units" --state-dir "$state" --port "$port" 2>&1)
+  status=$?
+  expect "port $port is a usage error" 2 "port"
+done
 
 reset
 run_setup --key-name 'bad name'

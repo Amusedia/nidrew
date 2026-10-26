@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 # Report the Harmonia cache: the harmonia account and its store access, the
-# signing key's protection, managed files, units and the local listener, and a
-# store path served with a signature that verifies against the published public
-# key, checked as nidrew. With --restart, restart harmonia.service first to
-# show it recovers the key from protected Debian storage. Run as root (through
-# sudo). Never prints the secret key.
+# signing key's protection, managed files, units, the listener and its port
+# restrictions, access from loopback and rejection of other sources, and a
+# locally built path that nidrew substitutes into a fresh store with the
+# published public key and that is rejected without it. With --restart,
+# restart harmonia.service first to show it recovers the key from protected
+# Debian storage. Run as root (through sudo). Never prints the secret key.
 set -u
 umask 077
 
@@ -13,8 +14,7 @@ template_dir=$script_dir/harmonia
 harmonia_dir=/etc/harmonia
 unit_dir=/etc/systemd/system
 state_dir=/var/lib/nidrew
-cache_url=http://127.0.0.1:5000
-listen=127.0.0.1:5000
+port=5000
 account=harmonia
 reader=nidrew
 profile=/nix/var/nix/profiles/nidrew-server
@@ -28,6 +28,7 @@ usage() {
 Usage: sudo bash check-harmonia.sh [options]
 
   --restart             Restart harmonia.service before checking it
+  --port PORT           Cache port (default: 5000)
   --template-dir DIR    Templates (default: scripts/server/harmonia)
   --harmonia-dir DIR    Key and configuration directory (default: /etc/harmonia)
   --unit-dir DIR        systemd unit directory (default: /etc/systemd/system)
@@ -39,13 +40,14 @@ EOF
 
 while [ $# -gt 0 ]; do
   case $1 in
-    --template-dir | --harmonia-dir | --unit-dir | --state-dir)
+    --port | --template-dir | --harmonia-dir | --unit-dir | --state-dir)
       if [ $# -lt 2 ]; then
         printf 'Missing value for %s\n' "$1" >&2
         usage >&2
         exit 2
       fi
       case $1 in
+        --port) port=$2 ;;
         --template-dir) template_dir=$2 ;;
         --harmonia-dir) harmonia_dir=$2 ;;
         --unit-dir) unit_dir=$2 ;;
@@ -69,6 +71,17 @@ while [ $# -gt 0 ]; do
   esac
 done
 
+case $port in
+  '' | *[!0-9]* | 0*)
+    printf 'Invalid port: %s\n' "$port" >&2
+    usage >&2
+    exit 2
+    ;;
+esac
+cache_url=http://127.0.0.1:$port
+table='inet nidrew_harmonia'
+units="harmonia-firewall.service harmonia.socket harmonia.service"
+
 report() { printf '[%s] %s: %s\n' "$1" "$2" "$3"; }
 ok() { report ' ok ' "$1" "$2"; }
 fail() {
@@ -86,6 +99,7 @@ cd / || exit 1
 work=$(mktemp -d) || exit 1
 trap 'rm -rf "$work"' EXIT
 setup_hint="sudo bash $script_dir/setup-harmonia.sh"
+[ "$port" = 5000 ] || setup_hint="$setup_hint --port $port"
 secret=$harmonia_dir/secret-key
 public=$harmonia_dir/public-key
 
@@ -154,10 +168,14 @@ else
   fail key "$secret is missing or not a regular file; restore it from a backup or run $setup_hint"
 fi
 
-# Managed files.
-for file in "$harmonia_dir/harmonia.toml" "$unit_dir/harmonia.service" "$unit_dir/harmonia.socket"; do
-  cmp -s "$file" "$template_dir/${file##*/}" && ok files "$file matches the template" ||
-    fail files "$file differs from $template_dir/${file##*/}; run $setup_hint"
+# Managed files, compared with the templates for the selected port.
+for file in "$harmonia_dir/harmonia.toml" "$harmonia_dir/firewall.sh" "$unit_dir/harmonia-firewall.service" \
+  "$unit_dir/harmonia.socket" "$unit_dir/harmonia.service"; do
+  if sed "s/@PORT@/$port/g" "$template_dir/${file##*/}" 2>/dev/null | cmp -s "$file" -; then
+    ok files "$file matches the template for port $port"
+  else
+    fail files "$file differs from $template_dir/${file##*/} for port $port; run $setup_hint"
+  fi
 done
 if (sha256sum --quiet --check "$state_dir/managed.sha256" >/dev/null 2>&1); then
   ok files "managed files match the checksums in $state_dir/managed.sha256"
@@ -165,8 +183,8 @@ else
   fail files "managed files differ from $state_dir/managed.sha256 (local edits?); run $setup_hint"
 fi
 
-# Units and the local listener.
-for unit in harmonia.socket harmonia.service; do
+# Units, the port restrictions, and the listener.
+for unit in $units; do
   [ "$(systemctl is-enabled "$unit" 2>/dev/null)" = enabled ] && ok service "$unit is enabled" ||
     fail service "$unit is not enabled; run $setup_hint"
 done
@@ -177,11 +195,28 @@ if [ $restart -eq 1 ]; then
     fail service "harmonia.service did not restart; see: journalctl -u harmonia.service"
   fi
 fi
-[ "$(systemctl is-active harmonia.socket)" = active ] && ok service "harmonia.socket is active" ||
-  fail service "harmonia.socket is $(systemctl is-active harmonia.socket); after fixing the cause, run $setup_hint"
-listeners=$(ss -Hltn | awk '$4 ~ /:5000$/ { print $4 }' | sort -u | paste -sd' ')
-[ "$listeners" = "$listen" ] && ok service "only $listen listens on port 5000" ||
-  fail service "port 5000 listeners are '${listeners:-none}', expected only $listen"
+for unit in harmonia-firewall.service harmonia.socket; do
+  [ "$(systemctl is-active "$unit")" = active ] && ok service "$unit is active" ||
+    fail service "$unit is $(systemctl is-active "$unit"); see: systemctl status $unit; after fixing the cause, run $setup_hint"
+done
+gateway=$(ip -4 route show default | awk '{ print $3; exit }')
+rules=$("$profile/bin/nft" list table $table 2>/dev/null)
+if [ -z "$rules" ]; then
+  fail firewall "table $table is missing; restore it with: sudo systemctl restart harmonia-firewall.service harmonia.socket"
+else
+  printf '%s\n' "$rules" | grep -qF "tcp dport $port ip saddr { 127.0.0.0/8, $gateway } accept" &&
+    ok firewall "port $port accepts IPv4 from loopback and the WSL NAT gateway $gateway only" ||
+    fail firewall "table $table does not allow exactly loopback and the current gateway ${gateway:-none}; restart harmonia-firewall.service"
+  printf '%s\n' "$rules" | grep -qF "tcp dport $port ip6 saddr ::1 accept" &&
+    ok firewall "port $port accepts IPv6 from ::1 only" || fail firewall "table $table lacks the IPv6 loopback rule"
+  printf '%s\n' "$rules" | grep -qE "tcp dport $port counter packets [0-9]+ bytes [0-9]+ drop" &&
+    ok firewall "port $port drops every other IPv4 and IPv6 source" || fail firewall "table $table lacks the drop rule"
+fi
+listeners=$(ss -Hltn | awk -v p=":$port" 'substr($4, length($4) - length(p) + 1) == p { print $4 }' | sort -u | paste -sd' ')
+case $listeners in
+  "*:$port" | "[::]:$port") ok service "harmonia.socket listens on all IPv4 and IPv6 addresses at port $port" ;;
+  *) fail service "port $port listeners are '${listeners:-none}', expected only [::]:$port" ;;
+esac
 if [ "$(systemctl is-active harmonia.service)" = active ]; then
   pid=$(systemctl show -p MainPID --value harmonia.service)
   user=$(ps -o user= -p "$pid" 2>/dev/null | tr -d ' ')
@@ -191,29 +226,70 @@ else
   fail service "harmonia.service is $(systemctl is-active harmonia.service); see: journalctl -u harmonia.service; after fixing the cause, run $setup_hint"
 fi
 
-# Serving: a locally built path, so only Harmonia's signature can vouch for it.
-# The socket accepts connections while the service waits to restart, so every
-# request has a time limit.
-path=$(readlink -f "$profile")
-key=$(cat "$public" 2>/dev/null)
-if info=$(curl -fsS --max-time 10 "$cache_url/nix-cache-info" 2>"$work/curl.err"); then
-  ok cache "$cache_url/nix-cache-info: $(printf '%s' "$info" | tr '\n' ' ')"
-  if [ -n "$key" ] && as_reader timeout 120 "$profile_bin/nix" --extra-experimental-features nix-command \
-    store verify --store "$cache_url" --trusted-public-keys "$key" "$path" >"$work/verify.out" 2>&1; then
-    ok cache "$reader verified $path from $cache_url with ${key%%:*}"
+# Access: loopback is served; a source outside the allowed set, here this
+# instance's own eth0 and link-local addresses, is dropped. The socket accepts
+# connections while the service waits to restart, so every request has a time
+# limit.
+responding=0
+for url in "$cache_url" "http://[::1]:$port"; do
+  if info=$(curl -fsS -g --max-time 10 "$url/nix-cache-info" 2>"$work/curl.err"); then
+    ok access "$url/nix-cache-info: $(printf '%s' "$info" | tr '\n' ' ')"
+    responding=1
   else
-    fail cache "$reader cannot verify $path from $cache_url with the public key: $(tr '\n' ' ' <"$work/verify.out")"
+    fail access "$url/nix-cache-info failed: $(cat "$work/curl.err")"
   fi
-  as_reader timeout 120 "$profile_bin/nix" --extra-experimental-features nix-command store verify --no-contents \
-    --store "$cache_url" --trusted-public-keys "$upstream_key" "$path" >"$work/verify.out" 2>&1
-  if grep -q 'is untrusted' "$work/verify.out"; then
-    ok cache "$path is rejected as untrusted without the Harmonia key"
+done
+drops() { "$profile/bin/nft" list table $table 2>/dev/null | awk '/ drop$/ { for (i = 1; i < NF; i++) if ($i == "packets") print $(i + 1) }'; }
+self=$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{ for (i = 1; i < NF; i++) if ($i == "src") { print $(i + 1); exit } }')
+link_local=$(ip -6 -o addr show dev eth0 scope link 2>/dev/null | awk '{ sub("/.*", "", $4); print $4; exit }')
+[ -n "$self" ] || fail access "no IPv4 address on the default route to test rejection from"
+for source in $self $link_local; do
+  case $source in
+    *:*) url="http://[$source%25eth0]:$port/nix-cache-info" ;;
+    *) url="http://$source:$port/nix-cache-info" ;;
+  esac
+  before=$(drops)
+  if curl -sS -g --max-time 3 --interface "$source" "$url" >/dev/null 2>&1; then
+    fail access "$url was served to $source; the port restriction is not effective"
+  elif [ "$(drops)" -gt "${before:-0}" ] 2>/dev/null; then
+    ok access "a connection from $source, outside the allowed sources, was dropped"
   else
-    fail cache "$path from $cache_url was not rejected as untrusted without the Harmonia key: $(tr '\n' ' ' <"$work/verify.out")"
+    fail access "a connection from $source failed without reaching the drop rule"
+  fi
+done
+
+# Substitution into a fresh store: a path built locally as nidrew, so only
+# Harmonia's signature can vouch for it, with signatures required.
+key=$(cat "$public" 2>/dev/null)
+copy() {
+  local store status
+  store=$(as_reader mktemp -d) || return 1
+  as_reader timeout 120 "$profile_bin/nix" --extra-experimental-features nix-command copy \
+    --option require-sigs true --trusted-public-keys "$1" --from "$cache_url" --to "$store/store" "$path" \
+    >"$work/copy.out" 2>&1
+  status=$?
+  as_reader chmod -R u+w "$store" 2>/dev/null
+  rm -rf "$store"
+  return $status
+}
+if [ $responding -eq 1 ] && [ -n "$key" ]; then
+  expr=$(printf 'derivation { name = "nidrew-cache-check"; system = builtins.currentSystem; builder = "/bin/sh"; args = [ "-c" "echo ok > $out" ]; nonce = "%s"; }' "$(date +%s%N)")
+  if path=$(as_reader timeout 120 "$profile_bin/nix-build" --no-out-link --quiet -E "$expr" 2>"$work/build.err"); then
+    if copy "$key"; then
+      ok cache "$reader substituted $path from $cache_url into a fresh store with ${key%%:*}"
+    else
+      fail cache "$reader cannot substitute $path from $cache_url with the public key: $(tr '\n' ' ' <"$work/copy.out")"
+    fi
+    if ! copy "$upstream_key" && grep -q 'lacks a signature by a trusted key' "$work/copy.out"; then
+      ok cache "a fresh store without the Harmonia key rejects $path"
+    else
+      fail cache "a fresh store without the Harmonia key did not reject $path: $(tr '\n' ' ' <"$work/copy.out")"
+    fi
+  else
+    fail cache "$reader cannot build a test path: $(tr '\n' ' ' <"$work/build.err")"
   fi
 else
-  fail cache "$cache_url/nix-cache-info failed: $(cat "$work/curl.err")"
-  report skip cache "signature checks need a responding cache"
+  report skip cache "substitution checks need a responding cache and $public"
 fi
 
 printf '\n'
@@ -221,4 +297,4 @@ if [ $failures -gt 0 ]; then
   printf 'Result: %s problem(s) found\n' "$failures"
   exit 1
 fi
-printf 'Result: Harmonia is ready on %s with %s\n' "$cache_url" "$key"
+printf 'Result: Harmonia is ready on port %s with %s\n' "$port" "$key"

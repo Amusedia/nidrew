@@ -1,0 +1,20 @@
+# Installed as /etc/systemd/system/harmonia-firewall.service by
+# scripts/server/setup-harmonia.sh. Loads the cache port restrictions before
+# harmonia.socket listens; harmonia.socket stops when this unit stops.
+[Unit]
+Description=Harmonia cache port restrictions (Nidrew)
+# Ordered before sockets.target, so it cannot wait for basic.target.
+DefaultDependencies=no
+After=sysinit.target
+Before=harmonia.socket shutdown.target
+Conflicts=shutdown.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+Environment=PATH=/nix/var/nix/profiles/nidrew-server/bin:/usr/sbin:/usr/bin:/sbin:/bin
+ExecStart=/bin/sh /etc/harmonia/firewall.sh start @PORT@
+ExecStop=/bin/sh /etc/harmonia/firewall.sh stop
+
+[Install]
+WantedBy=sockets.target

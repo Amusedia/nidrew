@@ -176,7 +176,7 @@ else
 fi
 # Harmonia 3 serves the cache with harmonia-cache; its harmonia binary is a
 # Nix-compatible CLI, so report package names rather than --version output.
-for tool in harmonia-cache skopeo; do
+for tool in harmonia-cache skopeo nft; do
   if [ -x "$profile/bin/$tool" ]; then
     package=$(readlink -f "$profile/bin/$tool")
     package=${package#/nix/store/*-}

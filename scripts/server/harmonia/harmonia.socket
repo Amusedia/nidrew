@@ -1,11 +1,14 @@
 # Installed as /etc/systemd/system/harmonia.socket by
-# scripts/server/setup-harmonia.sh. Local access only until the cache endpoint
-# and its network restrictions are configured.
+# scripts/server/setup-harmonia.sh. Listens on all IPv4 and IPv6 addresses;
+# harmonia-firewall.service restricts the port before the socket starts.
 [Unit]
 Description=Harmonia binary cache socket (Nidrew)
+BindsTo=harmonia-firewall.service
+After=harmonia-firewall.service
 
 [Socket]
-ListenStream=127.0.0.1:5000
+ListenStream=[::]:@PORT@
+BindIPv6Only=both
 
 [Install]
 WantedBy=sockets.target

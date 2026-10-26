@@ -51,10 +51,11 @@ command -v nix >/dev/null 2>&1 || {
 }
 flake_dir=$(cd "$flake_dir" && pwd) || exit 1
 summary() {
-  printf 'nixpkgs %s, harmonia %s, skopeo %s\n' \
+  printf 'nixpkgs %s, harmonia %s, skopeo %s, nftables %s\n' \
     "$(sed -n 's/.*"rev": "\([0-9a-f]*\)".*/\1/p' "$flake_dir/flake.lock" | head -n 1)" \
     "$(nix_cmd eval --raw "path:$flake_dir#harmonia.version")" \
-    "$(nix_cmd eval --raw "path:$flake_dir#skopeo.version")"
+    "$(nix_cmd eval --raw "path:$flake_dir#skopeo.version")" \
+    "$(nix_cmd eval --raw "path:$flake_dir#nftables.version")"
 }
 
 before=$(summary) || exit 1

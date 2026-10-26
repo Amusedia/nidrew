@@ -1,6 +1,7 @@
-# Server packages for the Debian Nidrew server: Harmonia and Skopeo from one
-# pinned nixpkgs revision, recorded in the committed flake.lock. Agent images
-# keep their own pins. Update the lock only with update-server-lock.sh.
+# Server packages for the Debian Nidrew server: Harmonia, Skopeo, and nftables
+# for the cache port restrictions, from one pinned nixpkgs revision recorded in
+# the committed flake.lock. Agent images keep their own pins. Update the lock
+# only with update-server-lock.sh.
 {
   description = "Nidrew server packages";
 
@@ -13,12 +14,13 @@
     in
     {
       packages.x86_64-linux = {
-        inherit (pkgs) harmonia skopeo;
+        inherit (pkgs) harmonia nftables skopeo;
         # Installed by apply-nix-config.sh as the nidrew-server system profile.
         default = pkgs.buildEnv {
           name = "nidrew-server";
           paths = [
             pkgs.harmonia
+            pkgs.nftables
             pkgs.skopeo
           ];
         };

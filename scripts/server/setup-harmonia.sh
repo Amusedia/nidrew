@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Set up Harmonia as the harmonia account serving the Debian Nix store. Creates
 # the system account, provisions the cache signing key once in /etc/harmonia,
-# installs harmonia.toml and the harmonia socket and service units from
-# scripts/server/harmonia/, starts the service, and runs check-harmonia.sh.
+# installs harmonia.toml, the cache port restrictions, and the harmonia socket
+# and service units from scripts/server/harmonia/ for the selected port,
+# starts the service, and runs check-harmonia.sh.
 # Run as root (through sudo). A valid existing key is always kept; local edits,
 # unexpected files, and invalid keys stop the run before anything changes.
 set -u
@@ -15,6 +16,7 @@ unit_dir=/etc/systemd/system
 state_dir=/var/lib/nidrew
 account=harmonia
 key_name=nidrew-$(hostname -s)-1
+port=5000
 files_only=0
 
 usage() {
@@ -22,11 +24,12 @@ usage() {
 Usage: sudo bash setup-harmonia.sh [options]
 
 Create the harmonia system account, generate the cache signing key unless one
-exists, install the Harmonia configuration and systemd units, start the
-service on its local socket, and verify with check-harmonia.sh.
+exists, install the Harmonia configuration, the cache port restrictions, and
+the systemd units, start the service, and verify with check-harmonia.sh.
 
   --key-name NAME       Name for a newly generated key
                         (default: nidrew-<hostname>-1); ignored when a key exists
+  --port PORT           Cache port (default: 5000); pass it on every rerun
   --template-dir DIR    Templates (default: scripts/server/harmonia)
   --harmonia-dir DIR    Key and configuration directory (default: /etc/harmonia)
   --unit-dir DIR        systemd unit directory (default: /etc/systemd/system)
@@ -41,7 +44,7 @@ EOF
 
 while [ $# -gt 0 ]; do
   case $1 in
-    --key-name | --template-dir | --harmonia-dir | --unit-dir | --state-dir)
+    --key-name | --port | --template-dir | --harmonia-dir | --unit-dir | --state-dir)
       if [ $# -lt 2 ]; then
         printf 'Missing value for %s\n' "$1" >&2
         usage >&2
@@ -49,6 +52,7 @@ while [ $# -gt 0 ]; do
       fi
       case $1 in
         --key-name) key_name=$2 ;;
+        --port) port=$2 ;;
         --template-dir) template_dir=$2 ;;
         --harmonia-dir) harmonia_dir=$2 ;;
         --unit-dir) unit_dir=$2 ;;
@@ -72,6 +76,15 @@ while [ $# -gt 0 ]; do
   esac
 done
 
+case $port in
+  '' | *[!0-9]* | 0*) port=0 ;;
+esac
+if [ "$port" -lt 1 ] || [ "$port" -gt 65535 ]; then
+  printf 'Invalid port: use a number from 1 to 65535\n' >&2
+  usage >&2
+  exit 2
+fi
+
 refuse() {
   printf 'Refused: %s\n' "$1" >&2
   [ $# -lt 2 ] || printf 'Resolve: %s\n' "$2" >&2
@@ -93,7 +106,9 @@ harmonia_bin=/nix/var/nix/profiles/nidrew-server/bin/harmonia-cache
   refuse "$harmonia_bin is missing" "run apply-nix-config.sh first"
 
 template_dir=$(cd "$template_dir" 2>/dev/null && pwd) || refuse "cannot open the template directory"
-for file in harmonia.toml harmonia.service harmonia.socket; do
+templates="harmonia.toml firewall.sh harmonia-firewall.service harmonia.socket harmonia.service"
+units="harmonia-firewall.service harmonia.socket harmonia.service"
+for file in $templates; do
   [ -r "$template_dir/$file" ] || refuse "cannot read $template_dir/$file"
 done
 
@@ -102,6 +117,12 @@ done
 
 work=$(mktemp -d) || refuse "cannot create a temporary directory"
 trap 'rm -rf "$work"' EXIT
+# Candidates are the templates with the selected port.
+mkdir "$work/rendered"
+for file in $templates; do
+  sed "s/@PORT@/$port/g" "$template_dir/$file" >"$work/rendered/$file" || refuse "cannot render $file"
+done
+rendered=$work/rendered
 owner=$(id -u)
 secret=$harmonia_dir/secret-key
 public=$harmonia_dir/public-key
@@ -149,9 +170,11 @@ elif ! cmp -s "$public" "$work/public-key"; then
     "if $secret is the intended key, remove $public and rerun to derive it again"
 fi
 
-plan_file "$harmonia_dir/harmonia.toml" "$template_dir/harmonia.toml" "$template_dir/harmonia.toml"
-for unit in harmonia.service harmonia.socket; do
-  plan_file "$unit_dir/$unit" "$template_dir/$unit" "$template_dir/$unit"
+for file in harmonia.toml firewall.sh; do
+  plan_file "$harmonia_dir/$file" "$rendered/$file" "$template_dir/$file"
+done
+for unit in $units; do
+  plan_file "$unit_dir/$unit" "$rendered/$unit" "$template_dir/$unit"
 done
 
 if [ $files_only -eq 0 ]; then
@@ -178,14 +201,16 @@ if [ $conflicts -gt 0 ]; then
 fi
 
 # Validate the candidate configuration before activation.
-NIDREW_TOML=$template_dir/harmonia.toml nix_cmd eval --impure --expr \
+NIDREW_TOML=$rendered/harmonia.toml nix_cmd eval --impure --expr \
   'builtins.fromTOML (builtins.readFile (builtins.getEnv "NIDREW_TOML"))' >/dev/null 2>"$work/toml.err" ||
   refuse "$template_dir/harmonia.toml is not valid TOML; nothing was changed: $(cat "$work/toml.err")"
+sh -n "$rendered/firewall.sh" 2>"$work/sh.err" ||
+  refuse "$template_dir/firewall.sh is not a valid shell script; nothing was changed: $(cat "$work/sh.err")"
 if [ $files_only -eq 0 ]; then
   mkdir "$work/units"
-  cp "$template_dir/harmonia.service" "$template_dir/harmonia.socket" "$work/units/"
+  for unit in $units; do cp "$rendered/$unit" "$work/units/"; done
   chmod 0644 "$work/units/"*
-  systemd-analyze verify "$work/units/harmonia.socket" "$work/units/harmonia.service" \
+  (cd "$work/units" && systemd-analyze verify $units) \
     >"$work/verify.err" 2>&1 ||
     refuse "the Harmonia units do not validate; nothing was changed: $(cat "$work/verify.err")"
 fi
@@ -213,21 +238,32 @@ printf '%s %s\n' "$public_action" "$public"
 
 units_changed=0
 config_changed=0
-apply_file "$harmonia_dir/harmonia.toml" "$template_dir/harmonia.toml"
+firewall_changed=0
+apply_file "$harmonia_dir/harmonia.toml" "$rendered/harmonia.toml"
 [ "${action[$harmonia_dir/harmonia.toml]}" = unchanged ] || config_changed=1
-for unit in harmonia.service harmonia.socket; do
-  apply_file "$unit_dir/$unit" "$template_dir/$unit"
+apply_file "$harmonia_dir/firewall.sh" "$rendered/firewall.sh"
+[ "${action[$harmonia_dir/firewall.sh]}" = unchanged ] || firewall_changed=1
+for unit in $units; do
+  apply_file "$unit_dir/$unit" "$rendered/$unit"
   [ "${action[$unit_dir/$unit]}" = unchanged ] || units_changed=1
 done
 printf 'Public key: %s\n' "$(cat "$public")"
 [ $files_only -eq 0 ] || exit 0
 
 [ $units_changed -eq 0 ] || systemctl daemon-reload || refuse "systemctl daemon-reload failed"
-systemctl enable harmonia.socket harmonia.service >/dev/null 2>&1 ||
-  refuse "cannot enable harmonia.socket and harmonia.service"
+systemctl enable $units >/dev/null 2>&1 || refuse "cannot enable $units"
 # A failed service or socket, for example after the key was missing, keeps
 # refusing starts until its failed state is cleared.
-systemctl reset-failed harmonia.service harmonia.socket 2>/dev/null
+systemctl reset-failed $units 2>/dev/null
+# The restrictions load before the socket listens; restarting them also stops
+# the socket, so it starts again below.
+if [ $units_changed -eq 1 ] || [ $firewall_changed -eq 1 ] ||
+  [ "$(systemctl is-active harmonia-firewall.service)" != active ]; then
+  systemctl restart harmonia-firewall.service ||
+    refuse "cannot restrict the cache port" "see: systemctl status harmonia-firewall.service"
+  printf 'restarted harmonia-firewall.service\n'
+  units_changed=1
+fi
 if [ $units_changed -eq 1 ] || [ "$(systemctl is-active harmonia.socket)" != active ]; then
   systemctl restart harmonia.socket || refuse "cannot start harmonia.socket; see: systemctl status harmonia.socket"
   printf 'started harmonia.socket\n'
@@ -240,5 +276,5 @@ if [ $units_changed -eq 1 ] || [ $config_changed -eq 1 ] || [ "$key_action" = ge
 fi
 
 printf '\n'
-bash "$script_dir/check-harmonia.sh" --harmonia-dir "$harmonia_dir" --unit-dir "$unit_dir" \
+bash "$script_dir/check-harmonia.sh" --port "$port" --harmonia-dir "$harmonia_dir" --unit-dir "$unit_dir" \
   --template-dir "$template_dir" --state-dir "$state_dir"
