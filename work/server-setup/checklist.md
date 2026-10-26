@@ -264,7 +264,36 @@ cd3cf49, 6595a9e, 7f42446, f2508a5
 
 ## Summary
 
+- Probed the actual path with a throwaway `wslc` container: in WSL NAT mode
+  the Windows host and containers both reach Debian from the NAT gateway
+  (172.30.208.1); Debian has no global IPv6.
+- `harmonia.socket` now listens on `[::]:5000` (`--port` on setup and check;
+  templates use `@PORT@`) and is bound to the new
+  `harmonia-firewall.service`, which loads `scripts/server/harmonia/firewall.sh`
+  before the socket starts. Its own nftables table `inet nidrew_harmonia`
+  accepts the port from `127.0.0.0/8`, `::1`, and the gateway discovered at
+  start, and drops every other IPv4 and IPv6 source; other rules are kept.
+  Non-NAT networking modes are refused. nftables joined the server profile.
+- `check-harmonia.sh` checks the table, listener, loopback access, dropped
+  connections from Debian's own eth0 and link-local addresses, and as
+  `nidrew` substitution of a locally built path into a fresh store with
+  signatures required, and its rejection without the Harmonia key.
+- Added `scripts/server/cache-endpoint.sh` and
+  `scripts/host/get-cache-endpoint.ps1` to publish the current endpoint and
+  public key and check the cache from Windows, warning about port proxies.
+  Documented the endpoint contract and limitations in `scripts/README.md`
+  and the listen decision in [plan.md](plan.md).
+- Verification: 13 firewall, 10 endpoint, and 46 setup tests pass. On this
+  host setup and check passed and a rerun changed nothing; Windows and a
+  `wslc` container reached the cache; stopping the restrictions closed the
+  port; a deleted table was detected; a port change round-tripped.
+- Awaiting later work: substitution by Nix inside a container, per-agent
+  grants through egress, a real LAN client, and a Debian restart (item 8).
+  Per-agent isolation is not verified. Details in [journal-2.md](journal-2.md).
+
 ## Done
+
+14d4f6d, 2f7961e, 11da2d1
 
 # 7. Register and verify the Windows login keepalive task
 
