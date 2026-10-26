@@ -312,6 +312,28 @@ cd3cf49, 6595a9e, 7f42446, f2508a5
 
 ## Summary
 
+- Added `scripts/host/keepalive-task.ps1` (`-Action Register|Status|Start|Stop`,
+  `-Distribution Debian`, `-LinuxUser nidrew`, `-TaskName`): the task
+  `\Nidrew Keepalive Debian`, marked as managed in its description, runs
+  `conhost.exe --headless wsl.exe --distribution Debian --user nidrew --exec
+  sleep infinity` at the owning user's logon, Interactive and Limited. No
+  time limit, `IgnoreNew`, no restart on failure, battery allowed, no idle
+  conditions or wake. A matching task is left alone, a managed one updated,
+  any other task with the name kept and reported. Status and Stop inspect
+  the `wsl.exe` processes, because Task Scheduler only tracks `conhost.exe`.
+- Recorded the settings decision in [plan.md](plan.md) (S4U needs
+  administrator rights) and documented the task in `scripts/README.md`.
+- Verification: 12 Pester tests pass. On this host, as a non-administrator,
+  Register created the task and a rerun left it unchanged; Start ran it
+  without a window and a second Start did not duplicate it; Debian had one
+  `sleep infinity` as `nidrew`; a foreign task was kept; a changed setting
+  was detected and restored; Stop ended the processes and the sleep.
+- Pending user-performed checks: the logon trigger after sign-out and sign-in,
+  a Windows restart, sleep and resume, and `wsl.exe --shutdown`. Debian
+  stopping without the keepalive was not observed, because Docker Desktop and
+  the Claude bridge keep their own WSL clients. Details in
+  [journal-2.md](journal-2.md).
+
 ## Done
 
 # 8. Complete reproducible setup, recovery checks, and user documentation
