@@ -99,7 +99,10 @@ refused (fixed in 6595a9e). The check then hung in `curl` against the held
 socket (fixed in 7f42446). The first recovery script added a byte order mark
 to the restored key.
 
-Not performed: the recovery script against the real key as root, rotation,
+Afterwards the user saved the real key with `-Action Save` (as root, target
+`nidrew-harmonia-secret-key`).
+
+Not performed: restoring the real key from Credential Manager, rotation,
 conflicting existing `harmonia` accounts, and a Debian restart (item 8).
 Harmonia warns that the systemd credential copy has mode 0440; it is visible
 only inside the service.
