@@ -59,6 +59,82 @@ records implementation lessons from the [checklist](checklist.md).
 - Windows PowerShell 5.1 sends a UTF-8 byte order mark to child standard
   input, through pipelines and `Process` alike, unless
   `[Console]::InputEncoding` is UTF-8 without one.
+- In WSL NAT mode, Debian sees both the Windows host and `wslc` containers
+  as the NAT gateway (here 172.30.208.1); `wslc` containers sit behind
+  their own Docker bridge (172.17.0.0/16) and are masqueraded on the way.
+  Debian has only a link-local IPv6 address. Allow the gateway, not a
+  subnet; Debian cannot tell agents apart.
+- A unit ordered before a socket needs `DefaultDependencies=no`; otherwise
+  its implicit `After=basic.target` forms a cycle with `sockets.target`.
+- nftables applies `table X; delete table X; table X { ... }` as one
+  transaction, so the restrictions are replaced atomically and the first
+  load needs no special case. A drop in any table is final, so the Nidrew
+  table restricts the port without touching other rules.
+- `curl --interface` cannot bind an IPv6 link-local address without a
+  scope (errno 22); a link-local destination already selects the
+  link-local source.
+- `nix copy --to <dir>` as an untrusted user creates a fresh local store
+  that applies the user's `--trusted-public-keys`, a cheap isolated
+  substitution consumer.
+
+## 2026-10-25: Restricted cache endpoint (checklist item 6)
+
+Environment: as for item 5; WSL networking mode `nat`, Debian
+172.30.217.209/20 on eth0, gateway 172.30.208.1, no global IPv6. nftables
+1.1.6 from the server lock (Debian's 1.1.3 used only for prototyping).
+
+Network path probe: a throwaway busybox image built with
+`dockerTools.buildImage` from the pinned nixpkgs, loaded with `wslc load`,
+connected to a temporary socat listener in Debian. The container (172.17.0.2)
+and Windows both arrived from 172.30.208.1; Debian's own connections came
+from 127.0.0.1, ::1, or 172.30.217.209. The container had no IPv6 route. The
+probe image and files were removed afterwards.
+
+Checks performed:
+
+```sh
+scripts/server/tests/harmonia-firewall-test.sh   # 13 passed
+scripts/server/tests/cache-endpoint-test.sh      # 10 passed
+scripts/server/tests/setup-harmonia-test.sh      # 46 passed
+# all other server tests unchanged and passing
+sudo -u nidrew -i bash /home/nidrew/nidrew/scripts/server/sync-checkout.sh --revision 2f7961e
+sudo bash /home/nidrew/nidrew/scripts/server/apply-nix-config.sh
+sudo bash /home/nidrew/nidrew/scripts/server/setup-harmonia.sh       # twice
+sudo bash /home/nidrew/nidrew/scripts/server/check-harmonia.sh --restart
+# stop harmonia-firewall.service; delete the table with nft; --port 5001 and back
+```
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\host\get-cache-endpoint.ps1
+wslc run --rm nidrew-probe:1 wget -qO- http://172.30.217.209:5000/nix-cache-info
+```
+
+Observed: apply added nftables to the profile; setup installed the
+restrictions and socket and the check passed. The rerun changed nothing.
+`127.0.0.1` and `[::1]` were served; connections from 172.30.217.209 and
+from fe80::215:5dff:fe8d:a4b9 were dropped and counted. As `nidrew`, a
+locally built path was substituted into a fresh store with the Harmonia key
+and refused ("lacks a signature by a trusted key") with only the upstream
+key. From Windows the script reported `http://172.30.217.209:5000` with the
+public key and `Reachable: True`; the `wslc` container fetched
+`nix-cache-info`. Stopping `harmonia-firewall.service` also stopped the socket
+and service and removed the table, so nothing listened; setup restored them.
+Deleting the table with `nft` left the socket listening: the check failed
+three items, including non-allowed sources being served, and the printed
+restore command fixed it. `--port 5001` moved the listener and rules and the
+check passed; returning to 5000 did the same.
+
+First attempt: the IPv6 rejection probe bound `--interface` to the
+link-local address and failed before reaching the rule (fixed in 2f7961e).
+
+Not performed: a client on another LAN host (none available; NAT mode gives
+the LAN no route to Debian), a Windows port proxy, mirrored networking, a
+substitution by Nix inside a container (needs agent images), per-agent
+access, and restrictions after a Debian restart (item 8).
+
+What can be skipped: readers do not need to discover the container source
+address again on WSL NAT mode, use IPv6 global addresses, or bind the socket
+to the Debian address.
 
 ## 2026-10-25: Harmonia service and signing key (checklist item 5)
 

@@ -17,8 +17,10 @@ directly on Linux without PowerShell.
 | [server/apply-nix-config.sh](server/apply-nix-config.sh) | Debian, root through sudo | Apply the server Nix settings and registry, and build the locked server packages |
 | [server/check-nix-config.sh](server/check-nix-config.sh) | Debian, root through sudo | Check settings, registry, `<nixpkgs>`, packages, and Skopeo as `nidrew` |
 | [server/update-server-lock.sh](server/update-server-lock.sh) | Debian, ordinary user in the source checkout | Deliberately update the server nixpkgs pin |
-| [server/setup-harmonia.sh](server/setup-harmonia.sh) | Debian, root through sudo | Create the `harmonia` account and signing key, and run the local Harmonia service |
-| [server/check-harmonia.sh](server/check-harmonia.sh) | Debian, root through sudo | Check the key protection, service, and a signed path served to `nidrew` |
+| [server/setup-harmonia.sh](server/setup-harmonia.sh) | Debian, root through sudo | Create the `harmonia` account and signing key, restrict the cache port, and run Harmonia |
+| [server/check-harmonia.sh](server/check-harmonia.sh) | Debian, root through sudo | Check the key protection, service, port restrictions, and signed substitution as `nidrew` |
+| [server/cache-endpoint.sh](server/cache-endpoint.sh) | Debian, any user | Print the current cache endpoint and public key |
+| [host/get-cache-endpoint.ps1](host/get-cache-endpoint.ps1) | Windows PowerShell, invoking user | Discover the cache endpoint and public key and check the cache from Windows |
 | [host/harmonia-key-recovery.ps1](host/harmonia-key-recovery.ps1) | Windows PowerShell, invoking user | Optionally save or restore the signing key in Windows Credential Manager |
 
 WSL containers (`wslc`) require WSL 2.9 or later. The host check requires the
@@ -100,8 +102,8 @@ in the work journal.
 
 ## Server Nix configuration and packages
 
-[../nix/server/flake.nix](../nix/server/flake.nix) defines Harmonia and Skopeo
-from one nixpkgs input pinned in the committed
+[../nix/server/flake.nix](../nix/server/flake.nix) defines Harmonia, Skopeo,
+and nftables from one nixpkgs input pinned in the committed
 [../nix/server/flake.lock](../nix/server/flake.lock), independent of agent
 pins. [../nix/server/nidrew.conf](../nix/server/nidrew.conf) holds the
 server-wide settings: `nix-command` and `flakes`, `sandbox = true`,
@@ -127,7 +129,7 @@ Apply manages exactly these files:
 | `/etc/nix/nix.conf` | One added line, `include nidrew.conf`; other content is kept |
 | `/var/lib/nidrew/managed.sha256` | Last-applied checksums of the managed files |
 | `/var/lib/nidrew/previous/` | The previous version of each file apply replaced |
-| `/nix/var/nix/profiles/nidrew-server` | Profile with `bin/harmonia-cache` (Harmonia) and `bin/skopeo` |
+| `/nix/var/nix/profiles/nidrew-server` | Profile with `bin/harmonia-cache` (Harmonia), `bin/skopeo`, and `bin/nft` |
 
 Apply plans every file before changing any. Matching files are left alone and
 unchanged managed files are updated. A managed file edited locally, an
@@ -171,18 +173,22 @@ Setup creates the system account `harmonia` (no login shell, no sudo, only
 its own group, not a Nix trusted user), generates the signing key once, and
 installs and starts the service. Its output ends with the public key, which
 consumers add to `trusted-public-keys`. `--key-name NAME` names a newly
-generated key; the default is `nidrew-<hostname>-1`.
+generated key; the default is `nidrew-<hostname>-1`. `--port PORT` selects the
+cache port (default 5000); pass the same port to every later setup and check.
 
 | Path | Content |
 | --- | --- |
 | `/etc/harmonia/secret-key` | Signing key, root:root mode 0600; created once, never replaced |
 | `/etc/harmonia/public-key` | Public key derived from it, mode 0644 |
 | `/etc/harmonia/harmonia.toml` | Copy of [server/harmonia/harmonia.toml](server/harmonia/harmonia.toml) |
-| `/etc/systemd/system/harmonia.socket` | Copy of [server/harmonia/harmonia.socket](server/harmonia/harmonia.socket): listens on `127.0.0.1:5000` only |
+| `/etc/harmonia/firewall.sh` | Copy of [server/harmonia/firewall.sh](server/harmonia/firewall.sh): loads the port restrictions |
+| `/etc/systemd/system/harmonia-firewall.service` | Copy of [server/harmonia/harmonia-firewall.service](server/harmonia/harmonia-firewall.service) |
+| `/etc/systemd/system/harmonia.socket` | Copy of [server/harmonia/harmonia.socket](server/harmonia/harmonia.socket): listens on `[::]:5000` |
 | `/etc/systemd/system/harmonia.service` | Copy of [server/harmonia/harmonia.service](server/harmonia/harmonia.service) |
 
 The configuration and units are managed files with checksums in
-`/var/lib/nidrew/managed.sha256`, handled like the Nix configuration above.
+`/var/lib/nidrew/managed.sha256`, handled like the Nix configuration above;
+`@PORT@` in the templates becomes the selected port.
 systemd passes the key to the service with `LoadCredential=`, so the unit
 holds only the path and Harmonia restarts from the Debian copy without any
 other input. The service runs as `harmonia` from the inherited socket with no
@@ -194,10 +200,44 @@ back; rerunning setup also clears a failed state.
 
 The check verifies the account, the key's protection and that its value is
 absent from the units, configuration, and journal, the managed files, the
-listener, and that `nidrew` can verify a locally built store path from the
-cache with the public key and that it is rejected without it. `--restart`
-restarts the service first. Network exposure beyond `127.0.0.1` is
-configured separately.
+port restrictions and listener, loopback access, that connections from this
+instance's own eth0 and IPv6 link-local addresses are dropped, and that
+`nidrew` can substitute a locally built path from the cache into a fresh store
+with the public key and signatures required, and that the path is rejected
+without the key. `--restart` restarts the service first.
+
+### Cache endpoint and network restrictions
+
+The socket listens on all IPv4 and IPv6 addresses. `harmonia-firewall.service`
+loads the nftables table `inet nidrew_harmonia` before the socket starts and
+the socket stops whenever it stops, so the port is never open unrestricted.
+The table accepts the port only from `127.0.0.0/8`, `::1`, and the WSL NAT
+gateway (the default route, discovered at each start), and drops every other
+IPv4 and IPv6 source. Other tables and rules are left alone. The script
+refuses WSL networking modes other than `nat`.
+
+In NAT mode the Windows host and WSL containers (`wslc`) both reach Debian
+from the gateway address, so the Debian rules cannot tell them apart or grant
+individual agents; per-agent grants belong to the egress container. LAN
+clients have no route to the NAT network. A Windows port proxy to the cache
+port would forward LAN clients from the gateway address and bypass this
+restriction; the endpoint script warns about one.
+
+The Debian address can change when WSL restarts. Discover the endpoint and
+public key for deployment configuration from Windows, which also checks that
+the cache answers from the host:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\host\get-cache-endpoint.ps1
+```
+
+In Debian, `bash scripts/server/cache-endpoint.sh` prints the same values as
+`address=`, `port=`, `endpoint=`, and `public_key=` lines.
+
+Do not enable Debian's `nftables.service` with its default
+`/etc/nftables.conf`: its `flush ruleset` removes the Nidrew table while the
+socket keeps listening. `check-harmonia.sh` reports a missing table; restore
+it with `sudo systemctl restart harmonia-firewall.service harmonia.socket`.
 
 ### Signing key backup, recovery, and rotation
 

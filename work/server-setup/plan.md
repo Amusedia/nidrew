@@ -330,7 +330,14 @@ configuration remain implementation questions.
   establishes package trust and does not replace network access restrictions.
 - Keep the signing key at `/etc/harmonia/secret-key` (root:root 0600) with
   `/etc/harmonia/public-key` published beside it. Run `harmonia-cache` from
-  `harmonia.socket` on `127.0.0.1:5000` until item 6 exposes the endpoint.
+  `harmonia.socket`.
+- Listen on `[::]:5000` (port configurable) because the WSL NAT address can
+  change at each WSL start. A dedicated nftables table, loaded by
+  `harmonia-firewall.service` before the socket and bound to it, accepts the
+  port from loopback and the WSL NAT gateway only. In NAT mode the Windows
+  host and `wslc` containers both arrive from the gateway, so the gateway is
+  the intended consumer; per-agent restriction remains egress work. Other WSL
+  networking modes are refused until needed.
 - Store Harmonia's operational signing key in protected root-owned Debian
   storage, provisioned once, and pass it through systemd `LoadCredential=`.
   An optional recovery copy can live in Windows Credential Manager. Preserve
