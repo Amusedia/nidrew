@@ -216,7 +216,37 @@ instructions into setup documentation rather than making users read the logs.
 
 ## Summary
 
+- Added `scripts/server/setup-harmonia.sh` (root; `--key-name`): creates the
+  `harmonia` system account (nologin, own group only, no sudo), generates the
+  signing key once as `/etc/harmonia/secret-key` (root:root 0600) with
+  `/etc/harmonia/public-key`, and installs `harmonia.toml` and the
+  `harmonia.socket` and `harmonia.service` units from
+  `scripts/server/harmonia/` as managed files. A valid key is always kept; an
+  orphaned public key, mismatched or invalid key, wrong mode, or local edits
+  stop the run unchanged. Validates TOML and units before activation.
+- The service runs `harmonia-cache` from the `nidrew-server` profile as
+  `harmonia`, socket-activated on `127.0.0.1:5000` only, with the key through
+  `LoadCredential=`, no network of its own, a read-only system, and
+  `RestartSec=5` so it recovers once a missing key is restored.
+- Added `scripts/server/check-harmonia.sh` (root; `--restart`): account, Nix
+  trust, store and database access, key protection and absence from units,
+  configuration, and journal, files, listener, and as `nidrew` a locally built
+  path verified with the public key and rejected as untrusted without it.
+- Added `scripts/host/harmonia-key-recovery.ps1` (`-Action Save|Restore`) for
+  an optional Credential Manager copy, and documented backup, recovery, and
+  rotation in `scripts/README.md`. Moved managed-file helpers into
+  `scripts/server/managed-files.sh`, shared with `apply-nix-config.sh`.
+- Verification: 33 setup tests and 23 apply tests pass. On this host, setup
+  and check passed, a rerun changed nothing, `--restart` served again from
+  the Debian key, a missing key failed the service and the check, and
+  restoring it recovered the service unaided. The recovery script round trip
+  passed with a throwaway key. Not exercised: the recovery script on the real
+  key, rotation, conflicting accounts, and a Debian restart. Details in
+  [journal-2.md](journal-2.md).
+
 ## Done
+
+cd3cf49, 6595a9e, 7f42446, f2508a5
 
 # 6. Expose and verify the restricted cache endpoint
 
