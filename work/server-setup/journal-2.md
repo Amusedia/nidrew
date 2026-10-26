@@ -76,6 +76,49 @@ records implementation lessons from the [checklist](checklist.md).
 - `nix copy --to <dir>` as an untrusted user creates a fresh local store
   that applies the user's `--trusted-public-keys`, a cheap isolated
   substitution consumer.
+- A Windows user without administrator rights cannot register an S4U task
+  ("run whether the user is logged on or not" without a password): Access is
+  denied. An interactive logon task with `conhost.exe --headless wsl.exe ...`
+  runs without a visible window.
+- `C:\Windows\System32\wsl.exe` starts a second `wsl.exe` with the same
+  command line. Stopping a task kills only its top process, so the children
+  and the Linux command keep running; killing the `wsl.exe` processes ends
+  the Linux command.
+
+## 2026-10-25: Windows keepalive task (checklist item 7)
+
+Environment: Windows 11 Pro 10.0.26200, WSL 3.0.3.0, kernel 6.18.54.1-1;
+Windows user `PLING\peijen`, a member of no administrator group; Pester
+3.4.0 (shipped with Windows PowerShell 5.1). No earlier WSL task existed.
+
+Checks performed:
+
+```powershell
+powershell -ExecutionPolicy Bypass -Command "Invoke-Pester scripts\host\tests"   # 12 passed
+scripts\host\keepalive-task.ps1 -Action Status      # before: task missing, exit 1
+scripts\host\keepalive-task.ps1 -Action Register    # twice
+scripts\host\keepalive-task.ps1 -Action Start       # twice
+scripts\host\keepalive-task.ps1 -Action Status
+# a foreign task named 'Nidrew Keepalive Conflict'; Register -TaskName on it
+# ExecutionTimeLimit changed to PT72H with Set-ScheduledTask; Status; Register twice
+scripts\host\keepalive-task.ps1 -Action Stop        # then Start and Status
+```
+
+Observed: Register created the task and the rerun reported it unchanged.
+The registered task has principal `peijen`, Interactive, Limited; a logon
+trigger for `PLING\peijen`; `ExecutionTimeLimit` PT0S, `IgnoreNew`, no
+battery conditions, `RestartCount` 0, no wake. Start ran the keepalive with
+no visible window; a second Start reported it running without a duplicate,
+and Debian had one `sleep infinity` as `nidrew`. The foreign task was
+reported as a conflict and kept unchanged (exit 1). The changed time limit
+was reported as a difference and Register restored it without stopping the
+running keepalive. Stop ended three processes and the Linux sleep.
+
+Not observed: Debian stopping without the keepalive. Docker Desktop and the
+Claude desktop bridge keep their own `wsl.exe` processes in Debian on this
+machine, so the instance stayed running for 90 s with no keepalive and no
+shell. Pending user-performed checks: the logon trigger after sign-out and
+sign-in, a Windows restart, sleep and resume, and `wsl.exe --shutdown`.
 
 ## 2026-10-25: Restricted cache endpoint (checklist item 6)
 

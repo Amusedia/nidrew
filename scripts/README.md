@@ -22,6 +22,7 @@ directly on Linux without PowerShell.
 | [server/cache-endpoint.sh](server/cache-endpoint.sh) | Debian, any user | Print the current cache endpoint and public key |
 | [host/get-cache-endpoint.ps1](host/get-cache-endpoint.ps1) | Windows PowerShell, invoking user | Discover the cache endpoint and public key and check the cache from Windows |
 | [host/harmonia-key-recovery.ps1](host/harmonia-key-recovery.ps1) | Windows PowerShell, invoking user | Optionally save or restore the signing key in Windows Credential Manager |
+| [host/keepalive-task.ps1](host/keepalive-task.ps1) | Windows PowerShell, invoking user | Register, inspect, start, or stop the login task that keeps Debian running |
 
 WSL containers (`wslc`) require WSL 2.9 or later. The host check requires the
 tested WSL 3.0.3 or later; update with `wsl.exe --update`.
@@ -283,3 +284,44 @@ sudo mv /etc/harmonia/secret-key /etc/harmonia/secret-key.retired
 sudo mv /etc/harmonia/public-key /etc/harmonia/public-key.retired
 sudo bash /home/nidrew/nidrew/scripts/server/setup-harmonia.sh --key-name nidrew-<hostname>-2
 ```
+
+## Windows keepalive task
+
+WSL stops an idle instance once no Windows process uses it, which would stop
+systemd, the Nix daemon, and Harmonia. A Scheduled Task keeps Debian running
+from your Windows logon. Register it as the Windows user who owns the WSL
+installation; administrator rights are not required. Provision `nidrew`
+first, because the keepalive runs as that unprivileged account:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\host\keepalive-task.ps1 -Action Register
+powershell -ExecutionPolicy Bypass -File scripts\host\keepalive-task.ps1 -Action Start
+powershell -ExecutionPolicy Bypass -File scripts\host\keepalive-task.ps1 -Action Status
+```
+
+The task is `\Nidrew Keepalive <Distribution>` in the Task Scheduler root
+folder (`-TaskName` overrides it; `-Distribution` and `-LinuxUser` default to
+`Debian` and `nidrew`). It runs only while you are logged on, starts at your
+logon, and runs this command through `conhost.exe --headless`, so no window
+opens:
+
+```text
+wsl.exe --distribution Debian --user nidrew --exec sleep infinity
+```
+
+Settings: no execution time limit; a second start is ignored while one runs;
+no restart on failure; starts and keeps running on battery; no idle
+conditions; never wakes the computer. Registration is rerunnable: a matching
+task is left alone, a task this script created is updated, and any other task
+with the name is kept and reported, with nothing changed. Delete such a task
+in Task Scheduler if it is an older keepalive, or choose another name.
+
+Task Scheduler tracks only `conhost.exe`. Ending the task there leaves
+`wsl.exe` and the sleep running, so use `-Action Stop`, which ends both.
+`-Action Start` does nothing while the keepalive runs. Running a task as
+"whether the user is logged on or not" without a stored password (S4U) needs
+administrator rights, so the task runs in your interactive session instead.
+
+The keepalive does not prevent an explicit `wsl.exe --shutdown` or a Windows
+shutdown. After `wsl.exe --shutdown`, Debian stays stopped until your next
+logon or `-Action Start`.

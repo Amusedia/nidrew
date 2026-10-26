@@ -278,6 +278,15 @@ configuration remain implementation questions.
   `wsl.exe --distribution Debian --exec sleep infinity` on this machine, with
   the distribution name configurable for other users. This is the existing
   keepalive mechanism, not a separate supervisor or Linux service.
+- Keepalive task settings: run the sleep as `nidrew` (`--user nidrew`), the
+  unprivileged operational account. Name the task
+  `\Nidrew Keepalive <Distribution>` in the root folder and mark it as managed
+  in its description. Run only while the user is logged on, without elevation,
+  because S4U registration needs administrator rights; start `wsl.exe`
+  through `conhost.exe --headless` so no window opens. No execution time
+  limit, `IgnoreNew` for further starts, no restart on failure so an explicit
+  `wsl.exe --shutdown` stays in effect, start and continue on battery, no
+  idle conditions, and no wake timers.
 - Use a dedicated `nidrew` account for routine server work, without general sudo
   or Nix `trusted-users` access. Keep administration in the existing account.
 - Use `/home/nidrew` for the account home, `/home/nidrew/nidrew` for the server
@@ -433,5 +442,4 @@ choices:
 Only unresolved decisions are listed here. Move each answer into Decisions or
 the relevant contract when agreed; keep pending checks in the follow-up above.
 
-- Keepalive task: which Linux user, task name, restart-on-failure policy,
-  execution time limit, and power settings should be used?
+None.
