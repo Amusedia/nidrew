@@ -324,4 +324,7 @@ administrator rights, so the task runs in your interactive session instead.
 
 The keepalive does not prevent an explicit `wsl.exe --shutdown` or a Windows
 shutdown. After `wsl.exe --shutdown`, Debian stays stopped until your next
-logon or `-Action Start`.
+logon or `-Action Start`. Signing out ends the task and stops Debian; it
+survives sleep and resume. In testing, two of six logons did not start the
+keepalive for an unknown reason; check with `-Action Status` after signing in
+and recover with `-Action Start`.

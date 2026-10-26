@@ -117,8 +117,45 @@ running keepalive. Stop ended three processes and the Linux sleep.
 Not observed: Debian stopping without the keepalive. Docker Desktop and the
 Claude desktop bridge keep their own `wsl.exe` processes in Debian on this
 machine, so the instance stayed running for 90 s with no keepalive and no
-shell. Pending user-performed checks: the logon trigger after sign-out and
-sign-in, a Windows restart, sleep and resume, and `wsl.exe --shutdown`.
+shell.
+
+### 2026-10-26: User-performed disruptive checks
+
+The user signed out and in, restarted Windows, let the computer sleep, and
+ran `wsl.exe --shutdown`, without starting anything else in WSL. Times come
+from Winlogon 7001/7002 and Kernel-Power events, WSL VM network ports
+(Hyper-V VmSwitch 67/69), Debian's `journalctl --list-boots` (each WSL
+instance start is a boot), and the task's last run. Task Scheduler history is
+disabled and enabling it needs administrator rights.
+
+| Time | Event | Debian |
+| --- | --- | --- |
+| 06:38:29 | sign-out | stopped 06:38:30 |
+| 06:38:55 | sign-in | started 06:39:46 |
+| 06:40:46 | sign-out | stopped 06:40:46; VM removed 06:41:25 |
+| 06:41:45 | sign-in | not started |
+| 06:49:24 | restart; sign-in 06:50:31 | not started; WSL network removed 06:50:38 |
+| 06:51-06:55 | modern standby | |
+| 06:56:04 | sign-in | started 06:56:09; task last run 06:56:04 |
+| 06:56:48 | `wsl.exe --shutdown` | stopped; task result 0x0; stayed stopped |
+| 06:58:40 | `-Action Start` | started 06:58:28 |
+| 07:08-07:11 | modern standby | keepalive kept running |
+| 07:15:26 | sign-out | stopped; VM removed 07:16:06 |
+| 07:15:56 | sign-in | started 07:16:13; task last run 07:15:56 |
+| 07:18:11 | restart; sign-in 07:19:18 | started 07:19:31; task last run 07:19:22 |
+
+Observed: sign-out stops Debian, as expected for a task that runs only while
+the user is logged on. The logon trigger restored Debian at three logons,
+including one while the previous VM was still shutting down and one after a
+restart; Nix and Harmonia were active after the restart. Sleep and resume
+kept the keepalive running. After `wsl.exe --shutdown` the task ended with
+0x0 and Debian stayed stopped until `-Action Start`.
+
+Unexplained: two logons (06:41:45 and 06:50:31) did not start Debian. Each
+run overwrites the task's last result, so whether the trigger fired or
+`wsl.exe` failed is unknown. Recovery is `-Action Start`. To diagnose a
+recurrence, an administrator can enable the history with
+`wevtutil set-log Microsoft-Windows-TaskScheduler/Operational /enabled:true`.
 
 ## 2026-10-25: Restricted cache endpoint (checklist item 6)
 
