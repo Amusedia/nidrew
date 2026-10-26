@@ -84,6 +84,83 @@ records implementation lessons from the [checklist](checklist.md).
   command line. Stopping a task kills only its top process, so the children
   and the Linux command keep running; killing the `wsl.exe` processes ends
   the Linux command.
+- In PowerShell, a function that runs a child command and then returns
+  `$LASTEXITCODE -eq 0` returns the child's output too; an `if` on it is
+  true whenever there was output, and the output is lost. Run the child and
+  test `$LASTEXITCODE` at the call site instead.
+
+## 2026-10-26: Complete setup, recovery checks, and contract review (checklist item 8)
+
+Environment: as for item 7; server checkout at a1027da.
+
+Checks performed:
+
+```sh
+scripts/server/tests/setup-server-test.sh   # 17 passed; all other server tests pass
+```
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\host\setup-server.ps1   # twice
+```
+
+```sh
+# as root: a comment appended to /etc/nix/nix.conf before the second run
+timeout -s TERM 4 bash /mnt/c/projects/nidrew/scripts/server/setup-server.sh   # stopped in step 3
+timeout -s TERM 8 bash /mnt/c/projects/nidrew/scripts/server/setup-server.sh   # stopped in step 4
+bash /mnt/c/projects/nidrew/scripts/server/setup-server.sh
+bash /home/nidrew/nidrew/scripts/server/check-server.sh
+```
+
+Observed: the first host run completed but showed that the host wrapper
+hid child output and ignored host step failures (fixed in a1027da). The
+second run selected a1027da, changed nothing except restarting
+`nix-daemon.service` (the appended comment made `nix.conf` newer than the
+daemon), kept the comment, left the keepalive task unchanged and running,
+and reported the server ready, with the endpoint reachable from Windows.
+Interrupted runs stopped in steps 3 and 4; the next run completed and the
+checks passed. These interruptions hit matching state; resumption of
+partially applied files and partial Nix installations is covered by the
+item 3 to 5 tests and refusals.
+
+Restart: after the Windows restart at 07:18 on 2026-10-26 the keepalive
+started Debian at 07:19:31 and `nix-daemon.socket`, `harmonia-firewall.service`,
+and `harmonia.socket` were active with no manual action (item 7 entry).
+Harmonia and its restrictions stayed in the units started at 07:19:32 during
+every later run, so the passing `check-harmonia.sh` signed substitution and
+rejection checks above are the repeated cache check after that restart.
+
+### Behavior contract review
+
+| Contract item | Status | Evidence |
+| --- | --- | --- |
+| Existing user, WSL configuration, personal files, and repository content kept | Met | Only documented managed files changed; `nix.conf` local line kept |
+| Routine work as `nidrew`; builds from the Linux-native clone | Met | Items 2 and 4; `check-account.sh` |
+| Nix daemon, Harmonia, Skopeo installed | Met | `check-server.sh` |
+| `nidrew` builds without sudo through build users | Met | `check-nix.sh` |
+| Checkout records the selected commit; local work preserved | Met | Item 2 sync tests and host refusals |
+| Nix download verified before execution | Met | Item 3 checksum refusal on the host |
+| Harmonia and Skopeo from the committed lock; reruns keep versions | Met | Item 4; the profile unchanged on reruns |
+| Explicit update workflow | Partly | `update-server-lock.sh` exists; a real pin update was not exercised |
+| Server-wide settings, registry, `<nixpkgs>`, no channels or extra trusted users | Met | `check-nix-config.sh` |
+| Skopeo inspect and copy as `nidrew` | Met | `check-nix-config.sh` |
+| Signed substitution with the key; rejection without it | Met | `check-harmonia.sh` |
+| Upstream substitution only; no self Harmonia substituter | Met | `nidrew.conf`; `check-nix-config.sh` |
+| Signing key unreadable by `nidrew`; systemd credential; restart without Windows | Met | Item 5; `check-harmonia.sh --restart` |
+| Harmonia least privilege and port restrictions | Met | Item 6; per-agent grants await egress |
+| Endpoint and public key published | Met | `get-cache-endpoint.ps1`, `cache-endpoint.sh` |
+| Reruns without duplicates or key replacement; conflicts explained | Met | Item tests; reruns on the host |
+| Managed files, checksums, previous copies, validation, resumption | Met | Items 4 to 5 tests; interrupted runs above |
+| Readiness checks without secrets | Met | `check-server.sh`; key-absence checks |
+| Services usable after a Debian restart | Met | Windows restart above; Nix and Harmonia active |
+| Keepalive task settings and behavior | Met with limitation | Item 7; two of six logons did not start Debian |
+| Host and Linux entry points; documentation | Met | `scripts/README.md` |
+| Permissions distinguished; manual actions listed | Met | Item 1; manual actions in `scripts/README.md` |
+
+Not verified in this work stream: per-agent access through egress,
+substitution by Nix inside an agent container, a LAN client, mirrored
+networking, a real pin update, key rotation, and the cause of the two
+logons that did not start the keepalive. Container, CLI, and egress
+milestones in GOAL.md are not part of this work stream.
 
 ## 2026-10-25: Windows keepalive task (checklist item 7)
 

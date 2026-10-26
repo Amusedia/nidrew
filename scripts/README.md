@@ -4,8 +4,72 @@ Scripts are organized by where they run. Host scripts are thin PowerShell entry
 points that call the Debian scripts through WSL; Debian scripts can also be run
 directly on Linux without PowerShell.
 
+## Reproduce the Nidrew server
+
+This sets up the existing WSL Debian instance as the persistent Nidrew server:
+the `nidrew` account and checkout, pinned multi-user Nix, the server Nix
+configuration and packages (Harmonia, Skopeo, nftables), and the restricted,
+signed Harmonia cache, plus the Windows keepalive task. It does not build or
+run agent containers, the egress container, or CLI logins; those are later
+work.
+
+Prerequisites: Windows with WSL 3.0.3 or later, a WSL 2 Debian distribution
+with systemd, and this repository cloned on Windows (default
+`C:\projects\nidrew`, seen from Linux as `/mnt/c/projects/nidrew`). Commit
+the changes you want first: the server checkout receives only committed
+revisions. The setup downloads the pinned Nix installer and packages.
+
+From Windows, as the user who owns the WSL distribution (no Windows
+administrator rights needed):
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\host\setup-server.ps1
+powershell -ExecutionPolicy Bypass -File scripts\host\check-server.ps1
+```
+
+`setup-server.ps1` (`-Distribution Debian`, `-Source /mnt/c/projects/nidrew`,
+`-Revision HEAD`, `-Port 5000`, `-KeyName NAME`) runs the prerequisite
+check, then [server/setup-server.sh](server/setup-server.sh) as Linux root
+through `wsl.exe --user root`, which the distribution's owner can do without
+a Linux password; the command is printed before it runs. It then registers
+and starts the keepalive task and runs `check-server.ps1`. It stops at the
+first failure with the step and the message to resolve; every step keeps
+matching state, so rerun it after resolving a failure or an interruption.
+`check-server.ps1` runs the Debian checks, the keepalive status, and the
+endpoint check from Windows, and prints the cache endpoint and public key for
+deployment configuration.
+
+On Linux without PowerShell, an administrator runs the same Debian steps and
+checks; the keepalive task is Windows-only:
+
+```sh
+sudo bash /mnt/c/projects/nidrew/scripts/server/setup-server.sh --source /mnt/c/projects/nidrew --revision HEAD
+sudo bash /home/nidrew/nidrew/scripts/server/check-server.sh
+bash /home/nidrew/nidrew/scripts/server/cache-endpoint.sh
+```
+
+Manual actions:
+
+- Back up the Harmonia signing key once after the first setup; see
+  [Signing key backup, recovery, and rotation](#signing-key-backup-recovery-and-rotation).
+- After signing in to Windows, Debian should be running; if
+  `keepalive-task.ps1 -Action Status` reports no keepalive, run
+  `-Action Start`.
+- Update pins only deliberately, with `server/update-server-lock.sh` or
+  `server/nix-release.conf`, then commit and rerun the setup.
+
+The sections below describe each step, its managed files, and recovery. Tested
+versions and evidence are in
+[../work/server-setup/journal-2.md](../work/server-setup/journal-2.md).
+
+## Scripts
+
 | Script | Runs in | Purpose |
 | --- | --- | --- |
+| [host/setup-server.ps1](host/setup-server.ps1) | Windows PowerShell, invoking user | Run the prerequisites, Debian setup, keepalive task, and readiness checks |
+| [host/check-server.ps1](host/check-server.ps1) | Windows PowerShell, invoking user | Run the Debian checks, keepalive status, and cache endpoint check |
+| [server/setup-server.sh](server/setup-server.sh) | Debian, root through sudo | Run account, Nix, configuration, and Harmonia setup in order |
+| [server/check-server.sh](server/check-server.sh) | Debian, root through sudo | Run the account, Nix configuration, and Harmonia checks and summarize |
 | [host/check-prerequisites.ps1](host/check-prerequisites.ps1) | Windows PowerShell, invoking user | Check WSL 3.0.3 or later and the distribution, then run the Debian checks |
 | [server/check-prerequisites.sh](server/check-prerequisites.sh) | Debian, administrative account | Check systemd, tools, sudo access, and the source revision |
 | [server/provision-account.sh](server/provision-account.sh) | Debian, root through sudo | Create `nidrew`, `/home/nidrew/artifacts`, and the server checkout |
