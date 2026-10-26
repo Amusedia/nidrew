@@ -244,12 +244,14 @@ self=$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{ for (i = 1; i < NF; i++) if 
 link_local=$(ip -6 -o addr show dev eth0 scope link 2>/dev/null | awk '{ sub("/.*", "", $4); print $4; exit }')
 [ -n "$self" ] || fail access "no IPv4 address on the default route to test rejection from"
 for source in $self $link_local; do
+  # A link-local destination already uses the link-local source; binding to
+  # a link-local address would need a scope.
   case $source in
-    *:*) url="http://[$source%25eth0]:$port/nix-cache-info" ;;
-    *) url="http://$source:$port/nix-cache-info" ;;
+    *:*) url="http://[$source%25eth0]:$port/nix-cache-info" bind= ;;
+    *) url="http://$source:$port/nix-cache-info" bind=$source ;;
   esac
   before=$(drops)
-  if curl -sS -g --max-time 3 --interface "$source" "$url" >/dev/null 2>&1; then
+  if curl -sS -g --max-time 3 ${bind:+--interface "$bind"} "$url" >/dev/null 2>&1; then
     fail access "$url was served to $source; the port restriction is not effective"
   elif [ "$(drops)" -gt "${before:-0}" ] 2>/dev/null; then
     ok access "a connection from $source, outside the allowed sources, was dropped"
