@@ -108,6 +108,6 @@ harmonia_args=(--port "$port")
 [ -z "$key_name" ] || harmonia_args+=(--key-name "$key_name")
 run_step 4 "$steps/setup-harmonia.sh" "${harmonia_args[@]}"
 
-selected=$(git -C "$checkout" rev-parse --verify --quiet refs/nidrew/selected 2>/dev/null || true)
+selected=$(git -c safe.directory="$checkout" -C "$checkout" rev-parse --verify --quiet refs/nidrew/selected 2>/dev/null || true)
 printf '\nServer setup complete%s. Check readiness with:\n' "${selected:+ at $selected}"
 printf '  sudo bash %s --port %s\n' "$steps/check-server.sh" "$port"

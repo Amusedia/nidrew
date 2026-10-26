@@ -45,15 +45,15 @@ function Stop-Setup([string]$Step) {
     exit 1
 }
 
+# Runs a sibling host script; its output passes through and the caller checks
+# $LASTEXITCODE.
 function Invoke-HostScript([string]$Name, [string[]]$Arguments) {
     & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot $Name) @Arguments
-    $LASTEXITCODE -eq 0
 }
 
 Write-Output '== Prerequisites'
-if (-not (Invoke-HostScript 'check-prerequisites.ps1' @('-Distribution', $Distribution, '-Source', $Source, '-Revision', $Revision))) {
-    Stop-Setup 'prerequisites'
-}
+Invoke-HostScript 'check-prerequisites.ps1' @('-Distribution', $Distribution, '-Source', $Source, '-Revision', $Revision)
+if ($LASTEXITCODE -ne 0) { Stop-Setup 'prerequisites' }
 
 $linuxArgs = @('--source', $Source, '--revision', $Revision, '--port', "$Port")
 if ($KeyName) { $linuxArgs += @('--key-name', $KeyName) }
@@ -66,15 +66,12 @@ if ($LASTEXITCODE -ne 0) { Stop-Setup 'Debian server setup' }
 
 Write-Output ''
 Write-Output '== Keepalive task'
-if (-not (Invoke-HostScript 'keepalive-task.ps1' @('-Action', 'Register', '-Distribution', $Distribution))) {
-    Stop-Setup 'keepalive task registration'
-}
-if (-not (Invoke-HostScript 'keepalive-task.ps1' @('-Action', 'Start', '-Distribution', $Distribution))) {
-    Stop-Setup 'keepalive task start'
-}
+Invoke-HostScript 'keepalive-task.ps1' @('-Action', 'Register', '-Distribution', $Distribution)
+if ($LASTEXITCODE -ne 0) { Stop-Setup 'keepalive task registration' }
+Invoke-HostScript 'keepalive-task.ps1' @('-Action', 'Start', '-Distribution', $Distribution)
+if ($LASTEXITCODE -ne 0) { Stop-Setup 'keepalive task start' }
 
 Write-Output ''
-if (-not (Invoke-HostScript 'check-server.ps1' @('-Distribution', $Distribution, '-Port', "$Port"))) {
-    Stop-Setup 'readiness checks'
-}
+Invoke-HostScript 'check-server.ps1' @('-Distribution', $Distribution, '-Port', "$Port")
+if ($LASTEXITCODE -ne 0) { Stop-Setup 'readiness checks' }
 exit 0
